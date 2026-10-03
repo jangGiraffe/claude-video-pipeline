@@ -76,6 +76,7 @@ Windows PowerShell 기준. Python은 항상 `.\.venv\Scripts\python.exe`, 실행
 - 완료 후 검증: `ffprobe -v error -show_entries stream=codec_type,width,height -show_entries format=duration -of compact work\<job>\output.mp4`
   → 1920×1080, video+audio 스트림, 길이 ≈ 음성 길이 + 0.8초. 30MB 넘으면 원격(폰)으로 못 보내니 `--crf 26` 정도로 다시.
 - `SendUserFile` 로 `work/<job>/output.mp4` 를 보낸다 (display: render).
+- `settings.local.json`(git 제외) 에 `output_dir` 이 있으면 run.py 가 렌더 후 `<output_dir>/<job>.mp4` 로 복사한다. 출력의 "복사:" 줄로 확인하고 경로를 사용자에게 알린다.
 
 ## 수정 요청 대응표
 | 요청 | 할 일 | 다시 실행 |

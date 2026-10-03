@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import setup_ffmpeg_path
+from common import load_settings, setup_ffmpeg_path
 
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
@@ -158,6 +158,14 @@ def main() -> None:
     run(["npx", "remotion", "render", "src/index.ts", "Explainer", str(work / "output.mp4"), props, f"--crf={a.crf}", "--log=error"],
         cwd=ROOT / "video")
     print(f"\n완성: {work / 'output.mp4'}")
+
+    # 완성본을 환경별 보관 폴더로 복사 (settings.local.json 의 output_dir, 없으면 생략)
+    dest = load_settings().get("output_dir")
+    if dest:
+        dest = Path(os.path.expandvars(os.path.expanduser(dest)))
+        dest.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(work / "output.mp4", dest / f"{a.job}.mp4")
+        print(f"복사: {dest / f'{a.job}.mp4'}")
 
 
 def check_refs(timing: dict, scenes: list[dict], starts: list[float]) -> bool:

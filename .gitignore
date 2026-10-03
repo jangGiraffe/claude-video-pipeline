@@ -27,3 +27,6 @@ work/*/bad_spans.json
 
 # 회사·대외비 발음 사전 (로컬 전용)
 pronounce.local.txt
+
+# 환경별 설정 (완성본 복사 폴더 등)
+settings.local.json

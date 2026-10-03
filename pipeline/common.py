@@ -93,6 +93,17 @@ def spoken_text(raw: str, pairs: list[tuple[str, str]] | None = None) -> str:
     return "\n".join(lines)
 
 
+def load_settings() -> dict:
+    """환경별 설정. 저장소 루트의 settings.local.json (git 제외) 을 읽는다. 없으면 빈 설정.
+    예시는 settings.example.json. 환경변수 VIDEO_OUTPUT_DIR 이 있으면 output_dir 보다 우선한다."""
+    import json
+    f = ROOT / "settings.local.json"
+    s = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    if os.environ.get("VIDEO_OUTPUT_DIR"):
+        s["output_dir"] = os.environ["VIDEO_OUTPUT_DIR"]
+    return s
+
+
 def get_api_key() -> str:
     key = os.environ.get("GEMINI_API_KEY")
     if not key and sys.platform == "win32":

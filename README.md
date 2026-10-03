@@ -90,7 +90,12 @@ cd video; npm install; cd ..
 
 # API 키 (사용자 환경변수에 저장)
 [Environment]::SetEnvironmentVariable("GEMINI_API_KEY", "발급받은키", "User")
+
+# (선택) 완성 영상 보관 폴더: 예시를 복사해 output_dir 을 내 환경에 맞게 수정
+Copy-Item settings.example.json settings.local.json
 ```
+
+`settings.local.json` 은 git 에서 제외됩니다. `output_dir` 을 정해 두면 렌더가 끝날 때 `work/<작업>/output.mp4` 를 `<output_dir>/<작업>.mp4` 로 복사해요 (환경변수 `VIDEO_OUTPUT_DIR` 가 있으면 그쪽이 우선).
 
 ## 🎯 사용법
 

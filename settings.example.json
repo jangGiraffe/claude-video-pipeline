@@ -1,0 +1,4 @@
+{
+  "_comment": "이 파일을 settings.local.json 으로 복사해 환경에 맞게 고치세요 (settings.local.json 은 git 제외). output_dir 을 지우면 복사하지 않습니다.",
+  "output_dir": "C:/Users/<사용자>/Videos/explainer"
+}
