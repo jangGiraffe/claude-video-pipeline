@@ -1,0 +1,34 @@
+{
+  "captions": true,
+  "scenes": [
+    {
+      "at": 0,
+      "type": "hook",
+      "props": { "lines": [{ "text": "영상 하나 만드는 데" }, { "text": "*몇 시간씩?*", "at": "몇" }] }
+    },
+    {
+      "at": 1,
+      "type": "keyword",
+      "props": { "chip": "script.txt", "text": "대본만 *쓰면 끝*", "at": "대본만" }
+    },
+    {
+      "at": 2,
+      "type": "steps",
+      "props": {
+        "title": "대본 → 영상 *자동화 파이프라인*",
+        "steps": [
+          { "icon": "🗣️", "label": "Gemini TTS", "sub": "대본 → 음성", "at": "제미나이" },
+          { "icon": "⏱️", "label": "Whisper", "sub": "음성 → 타이밍", "at": "위스퍼" },
+          { "icon": "🧠", "label": "Claude", "sub": "장면 기획", "at": "클로드" },
+          { "icon": "🎬", "label": "Remotion", "sub": "애니메이션", "at": "리모션" },
+          { "icon": "🎞️", "label": "MP4", "sub": "렌더링", "at": "MP4" }
+        ]
+      }
+    },
+    {
+      "at": 6,
+      "type": "title",
+      "props": { "kicker": "SCRIPT → MP4", "title": "이제 *전부 자동*", "subtitle": "대본 작성부터 렌더링까지" }
+    }
+  ]
+}

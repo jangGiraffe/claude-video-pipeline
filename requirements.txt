@@ -1,0 +1,7 @@
+google-genai>=2.28
+faster-whisper>=1.2
+# faster-whisper 1.2.x 는 av 16+ 와 호환 안 됨 (open() metadata_errors 오류)
+av<16
+# Windows에서 Whisper GPU 실행용 CUDA 라이브러리
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9,<10

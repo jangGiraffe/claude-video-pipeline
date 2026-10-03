@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "remotion-studio",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["remotion", "studio", "src/index.ts", "--port", "3000", "--no-open"],
+      "cwd": "video",
+      "port": 3000
+    }
+  ]
+}
