@@ -4,14 +4,14 @@ import { enter, pop } from "./anim";
 import { Emph, useAt, useScene } from "./timing";
 import type { TimeRef } from "./types";
 
-/** 글자 폭 추정(em). 한글 ≈ 1, 영문 대문자·숫자 ≈ 0.62, 소문자 ≈ 0.52, 공백·문장부호 ≈ 0.3 */
+/** 글자 폭 추정(em, 굵은 글꼴 기준으로 넉넉하게). 한글 ≈ 1, 영문 대문자·숫자 ≈ 0.7, 소문자 ≈ 0.56, 공백·문장부호 ≈ 0.4 */
 const textEm = (text: string) =>
   [...text.replace(/\*/g, "")].reduce((w, ch) => {
     if (/[\u3131-\uD7A3\u4E00-\u9FFF]/.test(ch)) return w + 1;
-    if (/[A-Z0-9%@#&]/.test(ch)) return w + 0.64;
-    if (/[a-z]/.test(ch)) return w + 0.54;
+    if (/[A-Z0-9%@#&]/.test(ch)) return w + 0.7;
+    if (/[a-z]/.test(ch)) return w + 0.56;
     if (/\p{Extended_Pictographic}/u.test(ch)) return w + 1.1;
-    return w + 0.32;
+    return w + 0.4;
   }, 0);
 
 /** 최대 폭(px)에 들어가도록 글자 크기를 줄인다 (base 이상으로 키우지는 않음) */
