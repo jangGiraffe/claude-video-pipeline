@@ -30,3 +30,7 @@ pronounce.local.txt
 
 # 환경별 설정 (완성본 복사 폴더 등)
 settings.local.json
+
+# 보이스 디자인으로 만든 목소리 목록·미리듣기 (프로젝트별)
+voices.local.json
+voices/

@@ -95,7 +95,8 @@ def spoken_text(raw: str, pairs: list[tuple[str, str]] | None = None) -> str:
 
 def load_settings() -> dict:
     """환경별 설정. 저장소 루트의 settings.local.json (git 제외) 을 읽는다. 없으면 빈 설정.
-    예시는 settings.example.json. 환경변수 VIDEO_OUTPUT_DIR 이 있으면 output_dir 보다 우선한다."""
+    예시는 settings.example.json. 키: output_dir(완성본 복사 폴더), voice(기본 목소리).
+    환경변수 VIDEO_OUTPUT_DIR 이 있으면 output_dir 보다 우선한다."""
     import json
     f = ROOT / "settings.local.json"
     s = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}

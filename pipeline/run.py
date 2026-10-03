@@ -14,6 +14,7 @@
   voice.wav, timing.json, subtitles.srt, output.mp4
 """
 import argparse
+import datetime
 import json
 import os
 import re
@@ -23,6 +24,7 @@ import sys
 from pathlib import Path
 
 from common import load_settings, setup_ffmpeg_path
+from voice_design import resolve_voice
 
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
@@ -45,13 +47,17 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("job")
     ap.add_argument("--style", default="밝고 친근하지만 신뢰감 있는 테크 유튜버 내레이션. 적당히 빠른 템포.")
-    ap.add_argument("--voice", default="Kore")
+    ap.add_argument("--voice", default=None,
+                    help="목소리: Kore 등 기본 목소리 또는 voice_design.py 로 만든 별칭 (기본: settings.local.json 의 voice, 없으면 Kore)")
     ap.add_argument("--model", default=None, help="TTS 모델을 하나로 고정 (기본: 무료 → 실패 시 유료). --style 은 3.8 계열에서만 적용")
     ap.add_argument("--no-paid", action="store_true", help="유료 모델로 넘어가지 않음 (무료로만 시도)")
     ap.add_argument("--from", dest="start", choices=STEPS, default="tts", help="이 단계부터 다시 실행")
     ap.add_argument("--stills", action="store_true", help="MP4 대신 장면별 미리보기 PNG만 (work/<job>/stills/)")
     ap.add_argument("--crf", type=int, default=23, help="화질(낮을수록 고화질·큰 파일). 기본 23 ≈ 3분에 20MB 안팎")
     a = ap.parse_args()
+    settings = load_settings()
+    a.voice = a.voice or settings.get("voice") or "Kore"
+    _, designed_model = resolve_voice(a.voice)  # 디자인한 목소리는 만든 모델에서만 쓸 수 있다
 
     setup_ffmpeg_path()
     work = ROOT / "work" / a.job
@@ -71,12 +77,12 @@ def main() -> None:
             quota_hit.append(cmd[cmd.index("--model") + 1])
         return code == 0
 
-    def make_voice(model: str, paid: bool) -> bool:
+    def make_voice(model: str, paid: bool, sole: bool = False) -> bool:
         """한 모델로 음성 생성 → 음성 검증. 검증 실패 시 문제 조각만 다시 합성. 끝내 안 되면 False."""
         tts = [PY, str(ROOT / "pipeline/tts.py"), str(script), str(work / "voice.wav"), "--voice", a.voice,
                "--style", a.style, "--model", model, "--strict",
-               "--attempts", "5" if paid else "2"]  # 무료는 응답이 없으면 빨리 포기하고 유료로
-        retries = RETRIES if paid else FREE_RETRIES
+               "--attempts", "5" if paid or sole else "2"]  # 무료는 응답이 없으면 빨리 포기하고 유료로
+        retries = RETRIES if paid or sole else FREE_RETRIES
         if not sh(tts):
             return False
         for attempt in range(retries + 1):
@@ -100,13 +106,17 @@ def main() -> None:
     if "tts" in todo:
         # 무료 모델로 먼저 시도 → 안 되면 유료 모델로 '전체' 재합성.
         # (조각마다 모델을 섞으면 모델별 목소리 높이가 달라 또 목소리가 바뀌어 들린다)
-        if a.model:
+        if designed_model:
+            if a.model and a.model != designed_model:
+                sys.exit(f"목소리 '{a.voice}' 는 {designed_model} 로 만든 것이라 --model {a.model} 와 함께 쓸 수 없습니다.")
+            tiers = [(designed_model, designed_model == PAID_MODEL)]  # 다른 모델로 넘어가면 목소리가 달라지므로 대체 없음
+        elif a.model:
             tiers = [(a.model, a.model == PAID_MODEL)]
         else:
             tiers = [(FREE_MODEL, False)] + ([] if a.no_paid else [(PAID_MODEL, True)])
         for i, (model, paid) in enumerate(tiers):
             print(f"\n=== 음성 생성: {model} ({'유료' if paid else '무료'}) ===")
-            if make_voice(model, paid):
+            if make_voice(model, paid, sole=len(tiers) == 1):
                 print(f"음성 완료: {model} ({'유료' if paid else '무료'})")
                 break
             if i + 1 < len(tiers):
@@ -160,12 +170,14 @@ def main() -> None:
     print(f"\n완성: {work / 'output.mp4'}")
 
     # 완성본을 환경별 보관 폴더로 복사 (settings.local.json 의 output_dir, 없으면 생략)
-    dest = load_settings().get("output_dir")
+    # 파일 이름 앞에 생성일(렌더한 날)을 붙인다: 20261004_<job>.mp4
+    dest = settings.get("output_dir")
     if dest:
         dest = Path(os.path.expandvars(os.path.expanduser(dest)))
         dest.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(work / "output.mp4", dest / f"{a.job}.mp4")
-        print(f"복사: {dest / f'{a.job}.mp4'}")
+        name = f"{datetime.date.today():%Y%m%d}_{a.job}.mp4"
+        shutil.copy2(work / "output.mp4", dest / name)
+        print(f"복사: {dest / name}")
 
 
 def check_refs(timing: dict, scenes: list[dict], starts: list[float]) -> bool:

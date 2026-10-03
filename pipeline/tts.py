@@ -36,6 +36,7 @@ from google import genai
 from google.genai import types
 
 from common import get_api_key, load_pronounce, spoken_text
+from voice_design import resolve_voice
 
 # 무료 3.8 Flash 를 먼저 쓰고, 실패하면 run.py 가 유료 2.5 Pro 로 전체를 다시 합성한다 (비용 절약).
 # - 3.8 Flash(무료): --style(speech_metadata) 지원. 목소리가 흔들리거나 혼잡 시 응답이 없을 때가 있다.
@@ -192,7 +193,7 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("script", help="대본 txt 파일")
     ap.add_argument("out", help="출력 wav 경로")
-    ap.add_argument("--voice", default="Kore")
+    ap.add_argument("--voice", default="Kore", help="기본 목소리 이름(Kore 등) 또는 voice_design.py 로 만든 별칭")
     ap.add_argument("--style", default=None, help="말투 지시 (예: '차분하고 친근한 유튜버 톤')")
     ap.add_argument("--chunk", type=int, default=12, help="한 번에 합성할 최대 줄 수 (이어지는 단락을 이만큼까지 묶음)")
     ap.add_argument("--rpm", type=int, default=RPM, help="분당 최대 호출 수")
@@ -208,6 +209,10 @@ def main() -> int:
     script = Path(a.script)
     text = spoken_text(script.read_text(encoding="utf-8-sig"), load_pronounce(script))
     chunks = chunk_lines(text, a.chunk)
+    voice_id, voice_model = resolve_voice(a.voice)  # 별칭이면 디자인한 보이스 ID 로
+    if voice_model and voice_model != MODEL:
+        print(f"실패: 목소리 '{a.voice}' 는 {voice_model} 로 만든 것이라 {MODEL} 에서 쓸 수 없습니다.")
+        return 1
     print(f"TTS {len(chunks)}조각 합성 (model={MODEL}, voice={a.voice})")
 
     # 조각별 캐시: 검증에서 문제가 난 조각만 지우고 다시 돌리면 나머지는 재사용된다
@@ -225,7 +230,7 @@ def main() -> int:
         f = cache / key(c)
         if f.exists():
             return f.read_bytes()
-        pcm = trim(synthesize_pcm(client, c, a.voice, a.style))
+        pcm = trim(synthesize_pcm(client, c, voice_id, a.style))
         f.write_bytes(pcm)
         return pcm
 

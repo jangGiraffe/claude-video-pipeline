@@ -137,10 +137,24 @@ Claude가 알아서
 | `--no-paid` | 유료 모델로 넘어가지 않음 (무료로만 시도, 실패하면 멈춤) |
 | `--model ...` | TTS 모델을 하나로 고정 (기본은 무료 → 실패 시 유료) |
 | `--style "..."` | 말투 지시 (예: `"차분하고 따뜻한 다큐 내레이션"`). 무료 3.8 모델에서만 적용, 유료 Pro 에선 무시 |
-| `--voice Kore` | 목소리 (Kore, Puck, Charon, Fenrir 등 30종) |
+| `--voice Kore` | 목소리 (Kore, Puck, Charon, Fenrir 등 30종, 또는 아래 보이스 디자인 별칭). 기본값은 `settings.local.json` 의 `voice` |
 | `--from tts\|transcribe\|render` | 해당 단계부터 다시 실행 |
 | `--stills` | MP4 대신 장면별 미리보기 PNG (요소가 차례로 켜지는 장면은 전부 켜진 모습도 한 장 더) |
 | `--crf 23` | 화질/용량 (낮을수록 고화질·큰 파일). 기본 23 ≈ 3분에 25MB |
+
+### 나만의 목소리 만들기 (보이스 디자인)
+
+목소리를 문장으로 묘사하면 Gemini 가 그 목소리를 만들어 저장해 둡니다 (3.8 Flash TTS, 프로젝트당 200개, 마지막 사용 후 1년 보관).
+매번 같은 목소리를 쓰니 영상마다·조각마다 톤이 흔들리는 문제가 줄어요.
+
+```powershell
+# 묘사는 한국어로 (영어로 쓰면 미리듣기가 영어로 나와요). 나이·성별·음색처럼 바뀌지 않는 특징만 1~2문장
+.\.venv\Scripts\python.exe pipeline\voice_design.py narrator-ko "30대 여성 내레이터. 맑고 따뜻한 중간 톤으로 또박또박 차분하게 말한다."
+# → voices.local.json 에 등록, 미리듣기 voices/narrator-ko.wav (둘 다 git 제외)
+
+.\.venv\Scripts\python.exe pipeline\run.py my-video --voice narrator-ko
+.\.venv\Scripts\python.exe pipeline\voice_design.py --list
+```
 
 ### 대본 작성 팁
 

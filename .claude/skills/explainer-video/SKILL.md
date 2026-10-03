@@ -46,6 +46,10 @@ Windows PowerShell 기준. Python은 항상 `.\.venv\Scripts\python.exe`, 실행
 - 요청 한도: TTS 모델마다 분당(RPM 10)·하루(RPD 50~100) 한도가 있다. tts.py 는 이어지는 단락을 `--chunk`(기본 12줄)까지 묶어 요청 수를 줄이고,
   호출 간격을 `--rpm`(기본 8) 이하로 맞추며, SDK 자동 재시도를 꺼 둔다. **"하루 요청 한도 초과"** 로 멈추면 한국 시간 16시(태평양 자정) 이후
   다시 돌리거나 `--model` 로 한도에 여유 있는 모델을 지정한다 (AI Studio '비율 제한' 페이지에서 확인). 무료·유료 둘 다 막히면 사용자에게 알린다.
+- **보이스 디자인**(권장): `pipeline\voice_design.py <별칭> "묘사 1~2문장"` 으로 나만의 목소리를 만들어 `voices.local.json` 에 등록한다
+  (미리듣기 `voices/<별칭>.wav`). **묘사는 한국어로 쓴다** — 영어로 쓰면 샘플이 영어로 나왔다. 나이·성별·음색·억양 같은 고정 특징만 쓰고,
+  그때그때의 말투는 `--style`. `--voice <별칭>` 또는 `settings.local.json` 의 `"voice"` 로 쓴다. 디자인한 목소리는 만든 모델(3.8 Flash TTS)에서만
+  되므로 유료 모델 대체 없이 그 모델로만 합성한다. `--list` 로 목록 확인.
 - 목소리: Kore(기본, 여성 차분), Puck/Charon/Fenrir/Orus 등 30종. 사용자가 원하면 `--voice`.
 
 ## 3. 장면 기획 (`work/<job>/scenes.json`) ← Claude의 핵심 작업
