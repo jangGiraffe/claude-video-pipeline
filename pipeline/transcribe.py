@@ -16,7 +16,7 @@ import re
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from common import setup_cuda_dlls, setup_ffmpeg_path
+from common import load_pronounce, parse_script, setup_cuda_dlls, setup_ffmpeg_path, spoken_text
 
 setup_cuda_dlls()
 setup_ffmpeg_path()
@@ -40,13 +40,9 @@ def whisper_words(audio: Path, model_name: str, prompt: str | None):
     return words, info.duration
 
 
-def split_sentences(script: str) -> list[str]:
-    parts = re.split(r"(?<=[.!?。…])\s+|\n+", script.strip())
-    return [p.strip() for p in parts if p.strip()]
-
-
-def align(script: str, words: list[dict]):
-    """대본 어절마다 Whisper 타이밍을 글자 정렬로 매핑."""
+def align(sentences: list[list[dict]], words: list[dict]):
+    """대본 어절마다 Whisper 타이밍을 글자 정렬로 매핑.
+    정렬은 '읽는 발음(spoken)' 글자로 하고, 결과 텍스트는 '화면 표기(display)'로 내보낸다."""
     # Whisper 쪽: 정규화 글자열 + 글자별 (start,end)
     w_chars, w_times = [], []
     for w in words:
@@ -60,13 +56,13 @@ def align(script: str, words: list[dict]):
     W = "".join(w_chars)
 
     # 대본 쪽: 문장 → 어절 → 정규화 글자 (어절 인덱스 기록)
-    sentences = split_sentences(script)
-    tokens, s_chars, s_owner = [], [], []
+    tokens, s_chars, s_owner, spoken = [], [], [], []
     for si, sent in enumerate(sentences):
-        for tok in sent.split():
+        for tok in sent:
             ti = len(tokens)
-            tokens.append({"text": tok, "sentence": si})
-            for c in norm(tok):
+            tokens.append({"text": tok["display"], "sentence": si})
+            spoken.append(tok["spoken"])
+            for c in norm(tok["spoken"]):
                 s_chars.append(c)
                 s_owner.append(ti)
     S = "".join(s_chars)
@@ -82,17 +78,51 @@ def align(script: str, words: list[dict]):
     # 역방향 검사: 음성에 대본에 없는 말이 섞였나 (TTS가 지시문을 읽음 / Whisper 환각)
     first_hit = next((j for j, h in enumerate(w_hit) if h), len(W))
     last_hit = max((j for j, h in enumerate(w_hit) if h), default=-1)
+    # 중간에 대본에 없는 말이 연속으로 나온 가장 긴 구간 (조각 합성 시 어느 조각이든 지시문을 읽을 수 있다)
+    longest, cur, cur_start, spans = "", "", 0, []
+    for j in range(first_hit, last_hit + 2):
+        if j <= last_hit and not w_hit[j]:
+            cur_start = j if not cur else cur_start
+            cur += W[j]
+            continue
+        if len(cur) >= 6:  # 연속 6글자 이상 대본에 없는 말 → 문제 구간
+            spans.append((w_times[cur_start][0], w_times[j - 1][1]))
+        if len(cur) > len(longest):
+            longest = cur
+        cur = ""
+    # 대본 첫 어절이 다르게 받아적힌 것(예: JPASS → '제이패스')은 지시문 낭독이 아니다
+    # → 대본 앞쪽의 정렬 안 된 글자 수만큼은 봐준다
+    s_lead = next((i for i, m in enumerate(mapped) if m), len(S))
+    lead_extra = first_hit - s_lead
+    if lead_extra >= 4:
+        spans.insert(0, (0.0, w_times[first_hit][0]))
     extra = {
-        "lead": W[:first_hit],                    # 대본 시작 전 말 → TTS가 지시문을 읽었을 가능성
+        "lead": W[:first_hit] if lead_extra >= 4 else "",  # 대본 시작 전 말 → TTS가 지시문을 읽었을 가능성
         "tail": W[last_hit + 1:],                 # 대본 끝 이후 말 → 대개 Whisper 환각
         "inner_ratio": sum(1 for j in range(first_hit, last_hit + 1) if not w_hit[j]) / max(1, len(W)),
+        "inner_run": longest,
+        "bad_spans": spans,   # 문제 구간(초) → run.py 가 해당 TTS 조각만 다시 합성
     }
 
+    # 대본 글자 → Whisper 글자 인덱스 (불일치 리포트용)
+    s2w: list[int | None] = [None] * len(S)
+    for a, b, size in SequenceMatcher(None, S, W, autojunk=False).get_matching_blocks():
+        for k in range(size):
+            s2w[a + k] = b + k
+
     # 어절 타이밍: 매핑된 글자들의 min start / max end
+    mismatches = []
     for ti, tok in enumerate(tokens):
-        ts = [mapped[i] for i, o in enumerate(s_owner) if o == ti and mapped[i]]
+        idx = [i for i, o in enumerate(s_owner) if o == ti]
+        ts = [mapped[i] for i in idx if mapped[i]]
         tok["start"] = min(t[0] for t in ts) if ts else None
         tok["end"] = max(t[1] for t in ts) if ts else None
+        if idx and len(ts) / len(idx) < 0.7:
+            # 앞뒤로 정렬된 Whisper 글자 사이 = 실제로 들린 말
+            lo = next((s2w[i] for i in range(idx[0] - 1, -1, -1) if s2w[i] is not None), -1)
+            hi = next((s2w[i] for i in range(idx[-1] + 1, len(S)) if s2w[i] is not None), len(W))
+            mismatches.append((tok["text"], spoken[ti], W[lo + 1:hi]))
+    extra["mismatches"] = mismatches
 
     # 매핑 실패한 어절은 앞뒤 어절 사이로 보간
     for ti, tok in enumerate(tokens):
@@ -102,9 +132,9 @@ def align(script: str, words: list[dict]):
             tok["start"], tok["end"] = prev_end, max(prev_end, next_start)
 
     sents = []
-    for si, text in enumerate(sentences):
+    for si in range(len(sentences)):
         ts = [t for t in tokens if t["sentence"] == si]
-        sents.append({"text": text, "start": ts[0]["start"], "end": ts[-1]["end"]})
+        sents.append({"text": " ".join(t["text"] for t in ts), "start": ts[0]["start"], "end": ts[-1]["end"]})
     matched = sum(1 for m in mapped if m) / max(1, len(mapped))
     return sents, tokens, matched, extra
 
@@ -130,13 +160,21 @@ def main() -> None:
     out.mkdir(parents=True, exist_ok=True)
     script = Path(a.script).read_text(encoding="utf-8-sig") if a.script else None
 
-    words, duration = whisper_words(Path(a.audio), a.model, script)
     if script:
-        sents, tokens, matched, extra = align(script, words)
+        pairs = load_pronounce(Path(a.script))
+        sentences = parse_script(script, pairs)
+        words, duration = whisper_words(Path(a.audio), a.model, spoken_text(script, pairs))
+        sents, tokens, matched, extra = align(sentences, words)
         print(f"대본 정렬 일치율: {matched:.1%} / 음성 중 대본에 없는 말(중간): {extra['inner_ratio']:.1%}")
         if extra["tail"]:
             print(f"참고: 대본 끝 이후 인식된 말 '{extra['tail']}' (보통 Whisper 환각, 무시됨)")
+        if extra["mismatches"]:
+            print("발음 점검 (대본과 다르게 들린 어절 — 오독이면 pronounce.txt 나 {표기|발음} 으로 교정):")
+            for disp, spk, heard in extra["mismatches"]:
+                print(f"  {disp}" + (f" (읽기: {spk})" if spk != disp else "") + f" → 들린 말: '{heard}'")
         problems = []
+        if len(extra["inner_run"]) >= 6:
+            problems.append(f"중간에 대본에 없는 말이 연속으로 있음: '{extra['inner_run']}' (지시문 낭독/환각 의심)")
         if len(extra["lead"]) >= 4:
             problems.append(f"대본 시작 전에 다른 말이 있음: '{extra['lead']}' (TTS가 지시문을 읽었을 수 있음)")
         if matched < 0.9:
@@ -145,9 +183,14 @@ def main() -> None:
             problems.append(f"음성에 대본에 없는 말이 {extra['inner_ratio']:.1%}")
         for p in problems:
             print("경고:", p)
+        bad = out / "bad_spans.json"
+        bad.unlink(missing_ok=True)
+        if problems:
+            bad.write_text(json.dumps({"spans": extra["bad_spans"], "whole": matched < 0.9}), encoding="utf-8")
         if problems and a.strict:
             raise SystemExit("검증 실패 (--strict)")
     else:
+        words, duration = whisper_words(Path(a.audio), a.model, None)
         tokens = [{**w, "sentence": 0} for w in words]
         sents = [{"text": " ".join(w["text"] for w in words), "start": words[0]["start"], "end": words[-1]["end"]}] if words else []
 

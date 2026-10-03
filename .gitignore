@@ -10,11 +10,15 @@ video/public/*
 !video/public/.gitkeep
 video/out/
 
-# 작업 산출물 (대본·기획·타이밍만 커밋, 무거운 미디어는 제외)
+# 작업 폴더: 공개 저장소이므로 예시(demo)만 커밋, 나머지 작업은 로컬 전용
+work/*
+!work/demo/
 work/*/voice.wav
 work/*/output.mp4
 work/*/stills/
-work/test/
+work/*/tts_cache/
+work/*/tts_chunks.json
+work/*/bad_spans.json
 
 # 기타
 .env

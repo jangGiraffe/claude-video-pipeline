@@ -19,7 +19,10 @@ Windows PowerShell 기준. Python은 항상 `.\.venv\Scripts\python.exe`, 실행
 - 대본 작성 규칙:
   - 말하듯 쓰는 구어체 한국어. **한 줄에 한 문장**, 한 문장은 대략 40자 이내.
   - 첫 문장은 시청자의 고민·질문으로 시작 (훅), 마지막은 한 줄 요약.
-  - 영어 고유명사는 TTS가 잘 읽도록 한글 표기도 고려 (예: Whisper → 위스퍼). 화면에는 영어로 써도 된다.
+  - 영어 고유명사·약어는 대본에 **영어 그대로** 쓰고, TTS가 잘못 읽으면 발음 사전으로 교정한다:
+    `work/<job>/pronounce.txt` (작업별) 또는 루트 `pronounce.txt` (공통)에 `표기 = 발음` 한 줄씩 (예: `Navitaire = 나비테어`).
+    한 번만 바꿀 땐 인라인 `{M/M으로|맨 먼스로}`. 자막·`words[].text`·`at` 은 **표기** 기준이다.
+  - 빈 줄로 단락을 나눈다 (주제 전환 지점). TTS가 단락 단위로 나눠 합성해 톤 드리프트를 막는다.
   - 분량 기준: 1분 ≈ 13~15문장.
 
 ## 2. 음성 + 타이밍
@@ -30,6 +33,9 @@ Windows PowerShell 기준. Python은 항상 `.\.venv\Scripts\python.exe`, 실행
 - 출력의 **"경고:"** 줄을 반드시 확인한다. `--strict` 로 돌기 때문에 경고가 있으면 실패한다.
   - "대본 시작 전에 다른 말" → TTS가 말투 지시를 읽음. `--style` 을 짧게 바꿔 다시.
   - "일치율 낮음" → TTS가 문장을 빠뜨림. 그대로 다시 돌리거나 대본을 짧게 나눈다.
+  - "중간에 대본에 없는 말" → TTS가 말을 지어냄. run.py 가 해당 조각만 자동 재합성(최대 3회). 그래도 실패하면 그 단락을 쪼갠다.
+- **"발음 점검"** 목록을 본다: 대본과 다르게 들린 어절. 숫자 표기 차이(다섯 → 5)·연음(1안 → 이란)은 무시하고,
+  진짜 오독(예: M/M → 엠퍼엠)만 `pronounce.txt` 에 추가한 뒤 `--from tts` 로 다시 (바뀐 조각만 재합성).
 - 말투 기본값: 밝고 신뢰감 있는 테크 유튜버 톤. 사용자가 원하면 `--style` 로 변경.
 - 목소리: Kore(기본, 여성 차분), Puck/Charon/Fenrir/Orus 등 30종. 사용자가 원하면 `--voice`.
 
@@ -49,16 +55,17 @@ Windows PowerShell 기준. Python은 항상 `.\.venv\Scripts\python.exe`, 실행
 ```powershell
 .\.venv\Scripts\python.exe pipeline\run.py <job> --from render --stills
 ```
-- `work/<job>/stills/scene*.png` 를 **Read로 전부 열어 본다.** 확인할 것:
+- `work/<job>/stills/scene*.png` 를 **Read로 전부 열어 본다** (많으면 ffmpeg `tile` 로 묶어서). steps/bullets 는 `_end` 컷(전부 켜진 상태)도 있다. 확인할 것:
   글자 넘침/줄바꿈 깨짐, 카드 정렬, 빈 화면, 자막과 겹침, 한글 폰트(네모 깨짐).
-- 문제 있으면 `scenes.json` (또는 `video/src/scenes.tsx`) 을 고치고 다시 stills.
+- 문제 있으면 `scenes.json` (또는 `video/src/scenes.tsx`) 을 고치고 **반드시 다시 stills** (stills 없이 바로 렌더 금지).
+- run.py 가 "at '…' 를 그 장면 안의 어절에서 찾지 못함" 경고를 내면 렌더가 멈춘다 → at 을 실제 어절(표기 기준)로 고친다.
 
 ## 5. 렌더링과 전달
 ```powershell
 .\.venv\Scripts\python.exe pipeline\run.py <job> --from render
 ```
 - 완료 후 검증: `ffprobe -v error -show_entries stream=codec_type,width,height -show_entries format=duration -of compact work\<job>\output.mp4`
-  → 1920×1080, video+audio 스트림, 길이 ≈ 음성 길이 + 0.8초.
+  → 1920×1080, video+audio 스트림, 길이 ≈ 음성 길이 + 0.8초. 30MB 넘으면 원격(폰)으로 못 보내니 `--crf 26` 정도로 다시.
 - `SendUserFile` 로 `work/<job>/output.mp4` 를 보낸다 (display: render).
 
 ## 수정 요청 대응표

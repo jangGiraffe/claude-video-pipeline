@@ -1,8 +1,84 @@
-"""파이프라인 공통 유틸: API 키 읽기, CUDA DLL 경로, ffmpeg 경로."""
+"""파이프라인 공통 유틸: API 키 읽기, CUDA DLL 경로, ffmpeg 경로, 대본 파싱(표기/발음 분리)."""
 import glob
 import os
+import re
 import site
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+# ───────── 대본: 화면 표기 vs 읽는 발음 ─────────
+# 인라인:  {M/M으로|맨먼스로}  → 자막엔 "M/M으로", TTS는 "맨먼스로"
+# 사전:    pronounce.txt (저장소 루트 + work/<job>/) 의 "표기 = 발음" 줄
+MARK = re.compile(r"\{([^{}|]*)\|([^{}]*)\}")
+TOKEN = re.compile(r"(?:\{[^{}]*\}|\S)+")          # 공백 기준 어절, {…} 묶음은 쪼개지 않음
+SENT_END = re.compile(r"(?<=[.!?。…])\s+(?![^{]*\})")  # {…} 안의 마침표에서는 문장을 자르지 않음
+JOSA = {"은": "는", "이": "가", "을": "를", "과": "와", "으로": "로"}  # 받침 있음 → 없음
+
+
+def load_pronounce(script_path: Path) -> list[tuple[str, str]]:
+    pairs: dict[str, str] = {}
+    for f in [ROOT / "pronounce.txt", Path(script_path).parent / "pronounce.txt"]:
+        if f.exists():
+            for line in f.read_text(encoding="utf-8-sig").splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" in line:
+                    k, v = (x.strip() for x in line.split("=", 1))
+                    if k and v:
+                        pairs[k] = v
+    return sorted(pairs.items(), key=lambda kv: -len(kv[0]))  # 긴 표기부터
+
+
+def _has_batchim(ch: str) -> bool:
+    return "가" <= ch <= "힣" and (ord(ch) - 0xAC00) % 28 != 0
+
+
+def _apply_dict(tok: str, pairs: list[tuple[str, str]]) -> str:
+    """사전 표기를 어절 안에서 {표기|발음} 으로 감싼다. 바로 뒤 조사가 발음 받침과 안 맞으면 고친다."""
+    if "{" in tok:
+        return tok  # 이미 인라인 지정
+    for disp, spoken in pairs:
+        i = tok.find(disp)
+        if i < 0:
+            continue
+        rest = tok[i + len(disp):]
+        m = re.match(r"^(으로|은|는|이|가|을|를|과|와|로)(?=[\W_]*$)", rest)
+        if m and spoken and "가" <= spoken[-1] <= "힣":
+            j = m.group(1)
+            batchim = _has_batchim(spoken[-1])
+            fixed = j
+            if not batchim and j in JOSA:
+                fixed = JOSA[j]
+            elif batchim and j in JOSA.values():
+                fixed = {v: k for k, v in JOSA.items()}[j]
+            return f"{tok[:i]}{{{disp}{j}|{spoken}{fixed}}}{rest[len(j):]}"
+        return f"{tok[:i]}{{{disp}|{spoken}}}{rest}"
+    return tok
+
+
+def parse_script(raw: str, pairs: list[tuple[str, str]] | None = None) -> list[list[dict]]:
+    """대본 → 문장 목록, 문장 = [{display, spoken}] 어절 목록."""
+    pairs = pairs or []
+    out = []
+    for line in raw.strip().splitlines():
+        for sent in SENT_END.split(line.strip()):
+            toks = []
+            for t in TOKEN.findall(sent):
+                t = _apply_dict(t, pairs)
+                toks.append({"display": MARK.sub(r"\1", t), "spoken": MARK.sub(r"\2", t)})
+            if toks:
+                out.append(toks)
+    return out
+
+
+def spoken_text(raw: str, pairs: list[tuple[str, str]] | None = None) -> str:
+    """TTS에 넣을 텍스트 (줄 구조 유지, 빈 줄 = 단락 구분 유지)."""
+    lines = []
+    for line in raw.strip().splitlines():
+        sents = parse_script(line, pairs) if line.strip() else []
+        lines.append(" ".join(" ".join(t["spoken"] for t in s) for s in sents))
+    return "\n".join(lines)
 
 
 def get_api_key() -> str:
