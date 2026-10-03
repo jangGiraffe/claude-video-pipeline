@@ -31,6 +31,7 @@ ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}  # 자식 프로세스 출력이 �
 RETRIES = 5       # 유료 모델: 음성 검증 실패 시 문제 조각만 다시 합성하는 최대 횟수
 FREE_RETRIES = 3  # 무료 모델: 이만큼 해도 안 되면 유료 모델로 넘어간다
 FREE_MODEL, PAID_MODEL = "gemini-3.8-flash-tts", "gemini-2.5-pro-preview-tts"  # tts.py 와 같게 유지
+EXIT_DAILY_QUOTA = 3  # tts.py 가 하루 요청 한도 초과로 끝날 때의 종료 코드
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -61,9 +62,14 @@ def main() -> None:
 
     stt = [PY, str(ROOT / "pipeline/transcribe.py"), str(work / "voice.wav"), str(work), "--script", str(script), "--strict"]
 
+    quota_hit: list[str] = []  # 하루 요청 한도에 걸린 모델
+
     def sh(cmd: list[str]) -> bool:
         print("▶", " ".join(cmd))
-        return subprocess.run(cmd, env=ENV).returncode == 0
+        code = subprocess.run(cmd, env=ENV).returncode
+        if code == EXIT_DAILY_QUOTA and "--model" in cmd:
+            quota_hit.append(cmd[cmd.index("--model") + 1])
+        return code == 0
 
     def make_voice(model: str, paid: bool) -> bool:
         """한 모델로 음성 생성 → 음성 검증. 검증 실패 시 문제 조각만 다시 합성. 끝내 안 되면 False."""
@@ -106,7 +112,11 @@ def main() -> None:
             if i + 1 < len(tiers):
                 print(f"\n{model} 로는 실패 → {tiers[i + 1][0]} ({'유료' if tiers[i + 1][1] else '무료'}) 로 전체 다시 합성")
         else:
-            sys.exit("실패: 음성 생성/검증" + ("" if len(tiers) > 1 or a.model else " (--no-paid 라 유료 모델은 쓰지 않음)"))
+            if quota_hit:
+                sys.exit(f"실패: 하루 요청 한도 초과 ({', '.join(dict.fromkeys(quota_hit))}). "
+                         "한국 시간 16시(태평양 자정, 서머타임 해제 후 17시) 이후 다시 실행하거나 "
+                         "--model 로 한도에 여유 있는 모델을 지정하세요.")
+            sys.exit("실패: 음성 생성/검증" +("" if len(tiers) > 1 or a.model else " (--no-paid 라 유료 모델은 쓰지 않음)"))
     elif "transcribe" in todo:
         if not sh(stt):
             sys.exit("실패: 음성 검증 (위 경고 참고)")

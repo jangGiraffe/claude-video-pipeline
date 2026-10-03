@@ -8,6 +8,12 @@
 여성 Kore 가 남성 음역까지 내려가기도 함). 그래서 조각마다 기본 주파수(F0)를 재서
 전체 중앙값에서 PITCH_TOL 이상 벗어난 조각은 다시 합성한다.
 
+요청 수 절약 (2026-10-04, 모델별 하루 한도 RPD·분당 한도 RPM 초과를 겪고 정리):
+- 단락을 하나씩 따로 합성하지 않고, 이어지는 단락을 --chunk 줄 수까지 묶어 한 번에 합성한다.
+- SDK 의 숨은 자동 재시도(429 를 받으면 조용히 다시 요청)를 끈다. 재시도는 아래 루프에서만, 보이게 한다.
+- 호출 간격을 --rpm 이하로 맞춘다 (병렬 3개가 몰려 분당 한도를 넘지 않게).
+- 하루 한도 초과(429 ...PerDay)는 재시도해도 소용없으므로 바로 exit 3 (run.py 가 안내).
+
 사용법:
   python pipeline/tts.py 대본.txt 출력.wav [--voice Kore] [--style "차분하고 친근하게"] [--chunk 7]
 """
@@ -27,6 +33,7 @@ from pathlib import Path
 
 import numpy as np
 from google import genai
+from google.genai import types
 
 from common import get_api_key, load_pronounce, spoken_text
 
@@ -45,6 +52,37 @@ KEEP_SEC = 0.08        # 자를 때 남겨 둘 여유
 CALL_TIMEOUT = 90      # API 한 번 호출 제한 시간(초). 응답 없이 멈추는 경우가 있다 (Pro 는 보통 10초 안팎)
 PITCH_TOL = 0.12       # 조각 F0 가 중앙값에서 이 비율 넘게 벗어나면 다른 목소리로 보고 재합성
 PITCH_ROUNDS = 4       # 목소리 맞추기 최대 반복
+RPM = 8                # 분당 최대 호출 수 (AI Studio 기준 TTS 모델 한도 10 보다 여유 있게)
+EXIT_DAILY_QUOTA = 3   # 하루 한도 초과 시 종료 코드 (run.py 와 같게 유지)
+
+
+class DailyQuotaError(RuntimeError):
+    """모델별 하루 요청 한도(RPD) 초과. 태평양 시간 자정(한국 16시, 서머타임 해제 후 17시)에 초기화."""
+
+
+_rate_lock = threading.Lock()
+_next_call = 0.0
+
+
+def _throttle() -> None:
+    """모든 스레드를 합쳐 호출 간격을 60/RPM 초 이상으로 맞춘다."""
+    global _next_call
+    with _rate_lock:
+        now = time.monotonic()
+        wait = _next_call - now
+        _next_call = max(now, _next_call) + 60 / RPM
+    if wait > 0:
+        time.sleep(wait)
+
+
+def _is_429(e: Exception) -> bool:
+    code = getattr(e, "status_code", None) or getattr(e, "code", None)
+    return code == 429 or "429" in str(e)[:40] or "RESOURCE_EXHAUSTED" in str(e)
+
+
+def _is_daily_quota(e: Exception) -> bool:
+    msg = str(e)
+    return _is_429(e) and ("PerDay" in msg or "per day" in msg.lower())
 
 
 def _call_with_timeout(fn, timeout: float):
@@ -73,6 +111,7 @@ def synthesize_pcm(client, text: str, voice: str, style: str | None) -> bytes:
         # 말투 지시는 본문에 섞으면 소리 내어 읽어버린다 → speech_metadata.style로 분리
         content["annotations"] = [{"type": "speech_metadata", "style": style}]
     for attempt in range(ATTEMPTS):
+        _throttle()
         try:
             interaction = _call_with_timeout(lambda: client.interactions.create(
                 model=MODEL,
@@ -82,11 +121,17 @@ def synthesize_pcm(client, text: str, voice: str, style: str | None) -> bytes:
             ), CALL_TIMEOUT)
             break
         except Exception as e:  # 레이트 리밋·일시 오류·무응답 → 백오프 후 재시도
+            if _is_daily_quota(e):
+                raise DailyQuotaError(f"{MODEL} 하루 요청 한도 초과") from e
             code = getattr(e, "status_code", None) or getattr(e, "code", None)
             if attempt == ATTEMPTS - 1 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
                 raise  # 요청 자체가 잘못된 오류(400 등)는 재시도해도 같다
-            print(f"  재시도 {attempt + 1}: {str(e)[:120]}")
-            time.sleep(10 * 2 ** attempt)
+            if _is_429(e):
+                print(f"  재시도 {attempt + 1}: 분당 한도 초과 → 60초 대기")
+                time.sleep(60)
+            else:
+                print(f"  재시도 {attempt + 1}: {str(e)[:120]}")
+                time.sleep(10 * 2 ** attempt)
     data = base64.b64decode(interaction.output_audio.data)
     if data[:4] == b"RIFF":
         with wave.open(io.BytesIO(data)) as w:
@@ -124,28 +169,38 @@ def pitch(pcm: bytes) -> float:
 
 
 def chunk_lines(text: str, size: int) -> list[str]:
-    """빈 줄로 나눈 단락을 우선 존중하고, 단락이 길면 size 줄씩 자른다."""
-    chunks = []
+    """단락(빈 줄) 경계에서만 자르되, 이어지는 단락을 size 줄까지 한 조각으로 묶는다.
+    한 단락이 size 줄보다 길면 그 단락만 size 줄씩 자른다. 조각 안의 단락 사이는 빈 줄로 남겨 쉼을 둔다."""
+    paras = []
     for para in text.split("\n\n"):
         lines = [l.strip() for l in para.splitlines() if l.strip()]
-        for i in range(0, len(lines), size):
-            chunks.append("\n".join(lines[i:i + size]))
-    return [c for c in chunks if c]
+        paras += [lines[i:i + size] for i in range(0, len(lines), size)]
+    chunks, cur, n = [], [], 0
+    for p in paras:
+        if cur and n + len(p) > size:
+            chunks.append("\n\n".join("\n".join(x) for x in cur))
+            cur, n = [], 0
+        cur.append(p)
+        n += len(p)
+    if cur:
+        chunks.append("\n\n".join("\n".join(x) for x in cur))
+    return chunks
 
 
 def main() -> int:
-    global MODEL, ATTEMPTS
+    global MODEL, ATTEMPTS, RPM
     ap = argparse.ArgumentParser()
     ap.add_argument("script", help="대본 txt 파일")
     ap.add_argument("out", help="출력 wav 경로")
     ap.add_argument("--voice", default="Kore")
     ap.add_argument("--style", default=None, help="말투 지시 (예: '차분하고 친근한 유튜버 톤')")
-    ap.add_argument("--chunk", type=int, default=7, help="한 번에 합성할 최대 줄 수")
+    ap.add_argument("--chunk", type=int, default=12, help="한 번에 합성할 최대 줄 수 (이어지는 단락을 이만큼까지 묶음)")
+    ap.add_argument("--rpm", type=int, default=RPM, help="분당 최대 호출 수")
     ap.add_argument("--model", default=MODEL, help=f"TTS 모델 (기본 {MODEL}, 유료 {PAID_MODEL})")
     ap.add_argument("--attempts", type=int, default=ATTEMPTS, help="호출 하나당 최대 시도 횟수")
     ap.add_argument("--strict", action="store_true", help="목소리 높낮이가 끝까지 안 맞으면 실패(exit 2)")
     a = ap.parse_args()
-    MODEL, ATTEMPTS = a.model, a.attempts
+    MODEL, ATTEMPTS, RPM = a.model, a.attempts, a.rpm
     if a.style and MODEL not in STYLE_MODELS:
         print(f"참고: {MODEL} 은 --style 을 지원하지 않아 무시합니다 (지원: {', '.join(sorted(STYLE_MODELS))})")
         a.style = None
@@ -159,7 +214,9 @@ def main() -> int:
     out = Path(a.out)
     cache = out.parent / "tts_cache"
     cache.mkdir(parents=True, exist_ok=True)
-    client = genai.Client(api_key=get_api_key())
+    # SDK 기본값은 429·5xx 를 조용히 재시도해 요청 수가 몇 배로 늘고 '응답 없음'처럼 보인다 → 끈다
+    client = genai.Client(api_key=get_api_key(),
+                          http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=0)))
 
     def key(c: str) -> str:
         return hashlib.sha1(f"{MODEL}|{a.voice}|{a.style}|{c}".encode()).hexdigest()[:16] + ".pcm"
@@ -178,6 +235,9 @@ def main() -> int:
         try:
             with ThreadPoolExecutor(max_workers=3) as ex:
                 pcms = list(ex.map(get, chunks))
+        except DailyQuotaError as e:
+            print(f"실패: {e} — 한국 시간 16시(태평양 자정) 이후 초기화. AI Studio '비율 제한' 페이지에서 확인")
+            return EXIT_DAILY_QUOTA
         except Exception as e:  # noqa: BLE001 — 무응답·오류: run.py 가 다음 모델로 넘어간다
             print(f"실패: TTS 호출 ({MODEL}) — {str(e)[:150]}")
             return 1
