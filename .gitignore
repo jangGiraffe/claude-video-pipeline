@@ -24,3 +24,6 @@ work/*/bad_spans.json
 .env
 *.log
 .claude/settings.local.json
+
+# 회사·대외비 발음 사전 (로컬 전용)
+pronounce.local.txt

@@ -10,7 +10,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # ───────── 대본: 화면 표기 vs 읽는 발음 ─────────
 # 인라인:  {M/M으로|맨먼스로}  → 자막엔 "M/M으로", TTS는 "맨먼스로"
-# 사전:    pronounce.txt (저장소 루트 + work/<job>/) 의 "표기 = 발음" 줄
+# 사전:    "표기 = 발음" 줄. 뒤에 오는 파일이 앞을 덮어쓴다.
+#          pronounce.txt        저장소 공통 (공개 · 일반 용어만)
+#          pronounce.local.txt  로컬 전용 (git 제외 · 회사/대외비 용어)
+#          work/<job>/pronounce.txt  작업별
 MARK = re.compile(r"\{([^{}|]*)\|([^{}]*)\}")
 TOKEN = re.compile(r"(?:\{[^{}]*\}|\S)+")          # 공백 기준 어절, {…} 묶음은 쪼개지 않음
 SENT_END = re.compile(r"(?<=[.!?。…])\s+(?![^{]*\})")  # {…} 안의 마침표에서는 문장을 자르지 않음
@@ -19,7 +22,7 @@ JOSA = {"은": "는", "이": "가", "을": "를", "과": "와", "으로": "로"}
 
 def load_pronounce(script_path: Path) -> list[tuple[str, str]]:
     pairs: dict[str, str] = {}
-    for f in [ROOT / "pronounce.txt", Path(script_path).parent / "pronounce.txt"]:
+    for f in [ROOT / "pronounce.txt", ROOT / "pronounce.local.txt", Path(script_path).parent / "pronounce.txt"]:
         if f.exists():
             for line in f.read_text(encoding="utf-8-sig").splitlines():
                 line = line.split("#", 1)[0].strip()
@@ -36,25 +39,34 @@ def _has_batchim(ch: str) -> bool:
 
 def _apply_dict(tok: str, pairs: list[tuple[str, str]]) -> str:
     """사전 표기를 어절 안에서 {표기|발음} 으로 감싼다. 바로 뒤 조사가 발음 받침과 안 맞으면 고친다."""
-    if "{" in tok:
+    if "{" in tok or not pairs:
         return tok  # 이미 인라인 지정
-    for disp, spoken in pairs:
-        i = tok.find(disp)
-        if i < 0:
-            continue
-        rest = tok[i + len(disp):]
-        m = re.match(r"^(으로|은|는|이|가|을|를|과|와|로)(?=[\W_]*$)", rest)
-        if m and spoken and "가" <= spoken[-1] <= "힣":
-            j = m.group(1)
-            batchim = _has_batchim(spoken[-1])
+    table = dict(pairs)
+    # 영문·숫자에 붙은 경우는 제외 (AU 가 AUTO 안에서 바뀌지 않게). 한 어절에 여러 개면 모두 (D-6~D-0)
+    pat = re.compile(r"(?<![A-Za-z0-9])(" + "|".join(re.escape(k) for k, _ in pairs) + r")(?![A-Za-z0-9])")
+    matches = list(pat.finditer(tok))
+    if not matches:
+        return tok
+    out, pos = [], 0
+    for n, mt in enumerate(matches):
+        disp, spoken = mt.group(1), table[mt.group(1)]
+        out.append(tok[pos:mt.start()])
+        pos = mt.end()
+        rest = tok[pos:]
+        j = re.match(r"^(으로|은|는|이|가|을|를|과|와|로)(?=[\W_]*$)", rest) if n == len(matches) - 1 else None
+        if j and "가" <= spoken[-1] <= "힣":
+            j = j.group(1)
             fixed = j
-            if not batchim and j in JOSA:
+            if not _has_batchim(spoken[-1]) and j in JOSA:
                 fixed = JOSA[j]
-            elif batchim and j in JOSA.values():
+            elif _has_batchim(spoken[-1]) and j in JOSA.values():
                 fixed = {v: k for k, v in JOSA.items()}[j]
-            return f"{tok[:i]}{{{disp}{j}|{spoken}{fixed}}}{rest[len(j):]}"
-        return f"{tok[:i]}{{{disp}|{spoken}}}{rest}"
-    return tok
+            out.append(f"{{{disp}{j}|{spoken}{fixed}}}")
+            pos += len(j)
+        else:
+            out.append(f"{{{disp}|{spoken}}}")
+    out.append(tok[pos:])
+    return "".join(out)
 
 
 def parse_script(raw: str, pairs: list[tuple[str, str]] | None = None) -> list[list[dict]]:
