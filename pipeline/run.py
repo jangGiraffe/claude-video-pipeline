@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
 STEPS = ["tts", "transcribe", "render"]
 ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}  # 자식 프로세스 출력이 바로바로 보이게
+RETRIES = 5  # 음성 검증 실패 시 문제 조각만 다시 합성하는 최대 횟수
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -57,12 +58,12 @@ def main() -> None:
         run(tts)
     if "transcribe" in todo:
         # 검증 실패 시: 문제 구간이 들어 있는 TTS 조각만 캐시에서 지우고 다시 합성 (최대 3회)
-        for attempt in range(4):
+        for attempt in range(RETRIES + 1):
             print("▶", " ".join(stt))
             if subprocess.run(stt, env=ENV).returncode == 0:
                 break
             bad = work / "bad_spans.json"
-            if attempt == 3 or "tts" not in todo or not bad.exists():
+            if attempt == RETRIES or "tts" not in todo or not bad.exists():
                 sys.exit("실패: 음성 검증 (위 경고 참고)")
             info = json.loads(bad.read_text(encoding="utf-8"))
             chunks = json.loads((work / "tts_chunks.json").read_text(encoding="utf-8"))
@@ -70,7 +71,7 @@ def main() -> None:
                 c for c in chunks if any(s < c["end"] + 0.3 and e > c["start"] - 0.3 for s, e in info["spans"])]
             for c in redo:
                 (work / "tts_cache" / c["cache"]).unlink(missing_ok=True)
-            print(f"\n재시도 {attempt + 1}/3: TTS 조각 {len(redo)}개 다시 합성 → " + " / ".join(c["text"].splitlines()[0][:20] for c in redo))
+            print(f"\n재시도 {attempt + 1}/{RETRIES}: TTS 조각 {len(redo)}개 다시 합성 → " + " / ".join(c["text"].splitlines()[0][:20] for c in redo))
             run(tts)
 
     if not (work / "scenes.json").exists():

@@ -40,6 +40,13 @@ def whisper_words(audio: Path, model_name: str, prompt: str | None):
     return words, info.duration
 
 
+def run_weight(run: str) -> int:
+    """대본에 없는 말 구간의 '의심 글자 수'. 영문은 빼고 센다:
+    발음 사전으로 영어 용어를 한글로 읽혀도 Whisper 는 영문으로 받아적는 일이 많다 (에이유 업데이트 파일 → 'auupdatefile').
+    TTS가 지어낸 말·반복은 한국어로 나온다."""
+    return sum(1 for c in run if not ("a" <= c <= "z"))
+
+
 def align(sentences: list[list[dict]], words: list[dict]):
     """대본 어절마다 Whisper 타이밍을 글자 정렬로 매핑.
     정렬은 '읽는 발음(spoken)' 글자로 하고, 결과 텍스트는 '화면 표기(display)'로 내보낸다."""
@@ -85,9 +92,9 @@ def align(sentences: list[list[dict]], words: list[dict]):
             cur_start = j if not cur else cur_start
             cur += W[j]
             continue
-        if len(cur) >= 6:  # 연속 6글자 이상 대본에 없는 말 → 문제 구간
+        if run_weight(cur) >= 6:  # 연속 6글자 이상 대본에 없는 말 → 문제 구간
             spans.append((w_times[cur_start][0], w_times[j - 1][1]))
-        if len(cur) > len(longest):
+        if run_weight(cur) > run_weight(longest):
             longest = cur
         cur = ""
     # 대본 첫 어절이 다르게 받아적힌 것(예: JPASS → '제이패스')은 지시문 낭독이 아니다
@@ -173,7 +180,7 @@ def main() -> None:
             for disp, spk, heard in extra["mismatches"]:
                 print(f"  {disp}" + (f" (읽기: {spk})" if spk != disp else "") + f" → 들린 말: '{heard}'")
         problems = []
-        if len(extra["inner_run"]) >= 6:
+        if run_weight(extra["inner_run"]) >= 6:
             problems.append(f"중간에 대본에 없는 말이 연속으로 있음: '{extra['inner_run']}' (지시문 낭독/환각 의심)")
         if len(extra["lead"]) >= 4:
             problems.append(f"대본 시작 전에 다른 말이 있음: '{extra['lead']}' (TTS가 지시문을 읽었을 수 있음)")
