@@ -30,15 +30,19 @@ from google import genai
 
 from common import get_api_key, load_pronounce, spoken_text
 
-# 기본은 유료 2.5 Pro: 조각 간 목소리가 가장 일정하고 응답이 안정적 (2026-10-03 측정: 8조각 편차 ±9%, 46초).
-# 3.8 계열은 --style(speech_metadata)을 지원하지만 목소리가 흔들리고, 혼잡 시 응답이 없을 때가 있다.
-MODEL = "gemini-2.5-pro-preview-tts"
+# 무료 3.8 Flash 를 먼저 쓰고, 실패하면 run.py 가 유료 2.5 Pro 로 전체를 다시 합성한다 (비용 절약).
+# - 3.8 Flash(무료): --style(speech_metadata) 지원. 목소리가 흔들리거나 혼잡 시 응답이 없을 때가 있다.
+# - 2.5 Pro(유료): 조각 간 목소리가 가장 일정 (2026-10-03 측정: 8조각 편차 ±9%, 46초). --style 미지원.
+FREE_MODEL = "gemini-3.8-flash-tts"
+PAID_MODEL = "gemini-2.5-pro-preview-tts"
+MODEL = FREE_MODEL
+ATTEMPTS = 5           # 호출 하나당 최대 시도 횟수 (무료 단계는 run.py 가 줄여서 빨리 포기)
 STYLE_MODELS = {"gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"}  # speech_metadata.style 지원 모델
 RATE, WIDTH, CH = 24000, 2, 1
 GAP_SEC = 0.5          # 조각 사이 무음
 SILENCE_AMP = 300      # 이보다 작은 진폭은 무음으로 보고 앞뒤를 자른다
 KEEP_SEC = 0.08        # 자를 때 남겨 둘 여유
-CALL_TIMEOUT = 120     # API 한 번 호출 제한 시간(초). 응답 없이 멈추는 경우가 있다
+CALL_TIMEOUT = 90      # API 한 번 호출 제한 시간(초). 응답 없이 멈추는 경우가 있다 (Pro 는 보통 10초 안팎)
 PITCH_TOL = 0.12       # 조각 F0 가 중앙값에서 이 비율 넘게 벗어나면 다른 목소리로 보고 재합성
 PITCH_ROUNDS = 4       # 목소리 맞추기 최대 반복
 
@@ -68,7 +72,7 @@ def synthesize_pcm(client, text: str, voice: str, style: str | None) -> bytes:
     if style and MODEL in STYLE_MODELS:
         # 말투 지시는 본문에 섞으면 소리 내어 읽어버린다 → speech_metadata.style로 분리
         content["annotations"] = [{"type": "speech_metadata", "style": style}]
-    for attempt in range(5):
+    for attempt in range(ATTEMPTS):
         try:
             interaction = _call_with_timeout(lambda: client.interactions.create(
                 model=MODEL,
@@ -79,7 +83,7 @@ def synthesize_pcm(client, text: str, voice: str, style: str | None) -> bytes:
             break
         except Exception as e:  # 레이트 리밋·일시 오류·무응답 → 백오프 후 재시도
             code = getattr(e, "status_code", None) or getattr(e, "code", None)
-            if attempt == 4 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
+            if attempt == ATTEMPTS - 1 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
                 raise  # 요청 자체가 잘못된 오류(400 등)는 재시도해도 같다
             print(f"  재시도 {attempt + 1}: {str(e)[:120]}")
             time.sleep(10 * 2 ** attempt)
@@ -129,17 +133,19 @@ def chunk_lines(text: str, size: int) -> list[str]:
     return [c for c in chunks if c]
 
 
-def main() -> None:
-    global MODEL
+def main() -> int:
+    global MODEL, ATTEMPTS
     ap = argparse.ArgumentParser()
     ap.add_argument("script", help="대본 txt 파일")
     ap.add_argument("out", help="출력 wav 경로")
     ap.add_argument("--voice", default="Kore")
     ap.add_argument("--style", default=None, help="말투 지시 (예: '차분하고 친근한 유튜버 톤')")
     ap.add_argument("--chunk", type=int, default=7, help="한 번에 합성할 최대 줄 수")
-    ap.add_argument("--model", default=MODEL, help=f"TTS 모델 (기본 {MODEL})")
+    ap.add_argument("--model", default=MODEL, help=f"TTS 모델 (기본 {MODEL}, 유료 {PAID_MODEL})")
+    ap.add_argument("--attempts", type=int, default=ATTEMPTS, help="호출 하나당 최대 시도 횟수")
+    ap.add_argument("--strict", action="store_true", help="목소리 높낮이가 끝까지 안 맞으면 실패(exit 2)")
     a = ap.parse_args()
-    MODEL = a.model
+    MODEL, ATTEMPTS = a.model, a.attempts
     if a.style and MODEL not in STYLE_MODELS:
         print(f"참고: {MODEL} 은 --style 을 지원하지 않아 무시합니다 (지원: {', '.join(sorted(STYLE_MODELS))})")
         a.style = None
@@ -167,15 +173,21 @@ def main() -> None:
         return pcm
 
     # 목소리 맞추기: 중앙값에서 벗어난 조각은 캐시를 지우고 다시 합성
+    pitch_ok = False
     for rnd in range(PITCH_ROUNDS + 1):
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            pcms = list(ex.map(get, chunks))
+        try:
+            with ThreadPoolExecutor(max_workers=3) as ex:
+                pcms = list(ex.map(get, chunks))
+        except Exception as e:  # noqa: BLE001 — 무응답·오류: run.py 가 다음 모델로 넘어간다
+            print(f"실패: TTS 호출 ({MODEL}) — {str(e)[:150]}")
+            return 1
         f0 = [pitch(p) for p in pcms]
         ref = statistics.median(v for v in f0 if v) if any(f0) else 0
         bad = [i for i, v in enumerate(f0) if ref and abs(v - ref) / ref > PITCH_TOL]
         print(f"  목소리 높낮이(Hz): " + " ".join(f"{v:.0f}" + ("*" if i in bad else "") for i, v in enumerate(f0))
               + f"  (기준 {ref:.0f})")
         if not bad:
+            pitch_ok = True
             break
         if rnd == PITCH_ROUNDS:
             print(f"경고: {len(bad)}개 조각의 목소리가 끝까지 다름 (* 표시). --style 을 빼거나 바꿔 보세요.")
@@ -200,6 +212,7 @@ def main() -> None:
         w.writeframes(gap.join(pcms))
     total = sum(len(p) for p in pcms) / WIDTH / RATE + GAP_SEC * (len(pcms) - 1)
     print(f"saved {out} ({total:.1f}s)")
+    return 2 if a.strict and not pitch_ok else 0
 
 
 if __name__ == "__main__":

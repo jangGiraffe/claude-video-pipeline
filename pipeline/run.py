@@ -1,6 +1,10 @@
 """대본 → MP4 전체 파이프라인.
 
   python pipeline/run.py <작업이름> [--style "..."] [--voice Kore] [--from tts|transcribe|render] [--stills]
+                                    [--no-paid] [--model ...]
+
+음성은 무료 모델(gemini-3.8-flash-tts)로 먼저 만들고, 응답이 없거나 검증(목소리 높낮이·대본 일치)을
+끝내 통과하지 못하면 유료 모델(gemini-2.5-pro-preview-tts)로 전체를 다시 만든다.
 
 작업 폴더 work/<작업이름>/ 에 필요한 것:
   script.txt   대본 (필수)
@@ -24,7 +28,9 @@ ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
 STEPS = ["tts", "transcribe", "render"]
 ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}  # 자식 프로세스 출력이 바로바로 보이게
-RETRIES = 5  # 음성 검증 실패 시 문제 조각만 다시 합성하는 최대 횟수
+RETRIES = 5       # 유료 모델: 음성 검증 실패 시 문제 조각만 다시 합성하는 최대 횟수
+FREE_RETRIES = 3  # 무료 모델: 이만큼 해도 안 되면 유료 모델로 넘어간다
+FREE_MODEL, PAID_MODEL = "gemini-3.8-flash-tts", "gemini-2.5-pro-preview-tts"  # tts.py 와 같게 유지
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> None:
@@ -39,7 +45,8 @@ def main() -> None:
     ap.add_argument("job")
     ap.add_argument("--style", default="밝고 친근하지만 신뢰감 있는 테크 유튜버 내레이션. 적당히 빠른 템포.")
     ap.add_argument("--voice", default="Kore")
-    ap.add_argument("--model", default=None, help="TTS 모델 (기본: tts.py 의 MODEL). --style 은 3.8 계열에서만 적용")
+    ap.add_argument("--model", default=None, help="TTS 모델을 하나로 고정 (기본: 무료 → 실패 시 유료). --style 은 3.8 계열에서만 적용")
+    ap.add_argument("--no-paid", action="store_true", help="유료 모델로 넘어가지 않음 (무료로만 시도)")
     ap.add_argument("--from", dest="start", choices=STEPS, default="tts", help="이 단계부터 다시 실행")
     ap.add_argument("--stills", action="store_true", help="MP4 대신 장면별 미리보기 PNG만 (work/<job>/stills/)")
     ap.add_argument("--crf", type=int, default=23, help="화질(낮을수록 고화질·큰 파일). 기본 23 ≈ 3분에 20MB 안팎")
@@ -52,27 +59,57 @@ def main() -> None:
         sys.exit(f"{script} 이(가) 없습니다.")
     todo = STEPS[STEPS.index(a.start):]
 
-    tts = [PY, str(ROOT / "pipeline/tts.py"), str(script), str(work / "voice.wav"), "--voice", a.voice, "--style", a.style] + (["--model", a.model] if a.model else [])
     stt = [PY, str(ROOT / "pipeline/transcribe.py"), str(work / "voice.wav"), str(work), "--script", str(script), "--strict"]
-    if "tts" in todo:
-        run(tts)
-    if "transcribe" in todo:
-        # 검증 실패 시: 문제 구간이 들어 있는 TTS 조각만 캐시에서 지우고 다시 합성 (최대 3회)
-        for attempt in range(RETRIES + 1):
-            print("▶", " ".join(stt))
-            if subprocess.run(stt, env=ENV).returncode == 0:
-                break
+
+    def sh(cmd: list[str]) -> bool:
+        print("▶", " ".join(cmd))
+        return subprocess.run(cmd, env=ENV).returncode == 0
+
+    def make_voice(model: str, paid: bool) -> bool:
+        """한 모델로 음성 생성 → 음성 검증. 검증 실패 시 문제 조각만 다시 합성. 끝내 안 되면 False."""
+        tts = [PY, str(ROOT / "pipeline/tts.py"), str(script), str(work / "voice.wav"), "--voice", a.voice,
+               "--style", a.style, "--model", model, "--strict",
+               "--attempts", "5" if paid else "2"]  # 무료는 응답이 없으면 빨리 포기하고 유료로
+        retries = RETRIES if paid else FREE_RETRIES
+        if not sh(tts):
+            return False
+        for attempt in range(retries + 1):
+            if sh(stt):
+                return True
             bad = work / "bad_spans.json"
-            if attempt == RETRIES or "tts" not in todo or not bad.exists():
-                sys.exit("실패: 음성 검증 (위 경고 참고)")
+            if attempt == retries or not bad.exists():
+                return False
             info = json.loads(bad.read_text(encoding="utf-8"))
             chunks = json.loads((work / "tts_chunks.json").read_text(encoding="utf-8"))
             redo = chunks if info["whole"] or not info["spans"] else [
                 c for c in chunks if any(s < c["end"] + 0.3 and e > c["start"] - 0.3 for s, e in info["spans"])]
             for c in redo:
                 (work / "tts_cache" / c["cache"]).unlink(missing_ok=True)
-            print(f"\n재시도 {attempt + 1}/{RETRIES}: TTS 조각 {len(redo)}개 다시 합성 → " + " / ".join(c["text"].splitlines()[0][:20] for c in redo))
-            run(tts)
+            print(f"\n재시도 {attempt + 1}/{retries}: TTS 조각 {len(redo)}개 다시 합성 → "
+                  + " / ".join(c["text"].splitlines()[0][:20] for c in redo))
+            if not sh(tts):
+                return False
+        return False
+
+    if "tts" in todo:
+        # 무료 모델로 먼저 시도 → 안 되면 유료 모델로 '전체' 재합성.
+        # (조각마다 모델을 섞으면 모델별 목소리 높이가 달라 또 목소리가 바뀌어 들린다)
+        if a.model:
+            tiers = [(a.model, a.model == PAID_MODEL)]
+        else:
+            tiers = [(FREE_MODEL, False)] + ([] if a.no_paid else [(PAID_MODEL, True)])
+        for i, (model, paid) in enumerate(tiers):
+            print(f"\n=== 음성 생성: {model} ({'유료' if paid else '무료'}) ===")
+            if make_voice(model, paid):
+                print(f"음성 완료: {model} ({'유료' if paid else '무료'})")
+                break
+            if i + 1 < len(tiers):
+                print(f"\n{model} 로는 실패 → {tiers[i + 1][0]} ({'유료' if tiers[i + 1][1] else '무료'}) 로 전체 다시 합성")
+        else:
+            sys.exit("실패: 음성 생성/검증" + ("" if len(tiers) > 1 or a.model else " (--no-paid 라 유료 모델은 쓰지 않음)"))
+    elif "transcribe" in todo:
+        if not sh(stt):
+            sys.exit("실패: 음성 검증 (위 경고 참고)")
 
     if not (work / "scenes.json").exists():
         print(f"\n타이밍 준비 완료. 이제 {work / 'scenes.json'} 장면 기획서가 필요합니다.")
