@@ -30,7 +30,10 @@ from google import genai
 
 from common import get_api_key, load_pronounce, spoken_text
 
-MODEL = "gemini-3.8-flash-tts"
+# 기본은 유료 2.5 Pro: 조각 간 목소리가 가장 일정하고 응답이 안정적 (2026-10-03 측정: 8조각 편차 ±9%, 46초).
+# 3.8 계열은 --style(speech_metadata)을 지원하지만 목소리가 흔들리고, 혼잡 시 응답이 없을 때가 있다.
+MODEL = "gemini-2.5-pro-preview-tts"
+STYLE_MODELS = {"gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts"}  # speech_metadata.style 지원 모델
 RATE, WIDTH, CH = 24000, 2, 1
 GAP_SEC = 0.5          # 조각 사이 무음
 SILENCE_AMP = 300      # 이보다 작은 진폭은 무음으로 보고 앞뒤를 자른다
@@ -62,7 +65,7 @@ def _safe(fn):
 
 def synthesize_pcm(client, text: str, voice: str, style: str | None) -> bytes:
     content = {"type": "text", "text": text}
-    if style:
+    if style and MODEL in STYLE_MODELS:
         # 말투 지시는 본문에 섞으면 소리 내어 읽어버린다 → speech_metadata.style로 분리
         content["annotations"] = [{"type": "speech_metadata", "style": style}]
     for attempt in range(5):
@@ -75,8 +78,9 @@ def synthesize_pcm(client, text: str, voice: str, style: str | None) -> bytes:
             ), CALL_TIMEOUT)
             break
         except Exception as e:  # 레이트 리밋·일시 오류·무응답 → 백오프 후 재시도
-            if attempt == 4:
-                raise
+            code = getattr(e, "status_code", None) or getattr(e, "code", None)
+            if attempt == 4 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
+                raise  # 요청 자체가 잘못된 오류(400 등)는 재시도해도 같다
             print(f"  재시도 {attempt + 1}: {str(e)[:120]}")
             time.sleep(10 * 2 ** attempt)
     data = base64.b64decode(interaction.output_audio.data)
@@ -126,18 +130,24 @@ def chunk_lines(text: str, size: int) -> list[str]:
 
 
 def main() -> None:
+    global MODEL
     ap = argparse.ArgumentParser()
     ap.add_argument("script", help="대본 txt 파일")
     ap.add_argument("out", help="출력 wav 경로")
     ap.add_argument("--voice", default="Kore")
     ap.add_argument("--style", default=None, help="말투 지시 (예: '차분하고 친근한 유튜버 톤')")
     ap.add_argument("--chunk", type=int, default=7, help="한 번에 합성할 최대 줄 수")
+    ap.add_argument("--model", default=MODEL, help=f"TTS 모델 (기본 {MODEL})")
     a = ap.parse_args()
+    MODEL = a.model
+    if a.style and MODEL not in STYLE_MODELS:
+        print(f"참고: {MODEL} 은 --style 을 지원하지 않아 무시합니다 (지원: {', '.join(sorted(STYLE_MODELS))})")
+        a.style = None
 
     script = Path(a.script)
     text = spoken_text(script.read_text(encoding="utf-8-sig"), load_pronounce(script))
     chunks = chunk_lines(text, a.chunk)
-    print(f"TTS {len(chunks)}조각 합성 (voice={a.voice})")
+    print(f"TTS {len(chunks)}조각 합성 (model={MODEL}, voice={a.voice})")
 
     # 조각별 캐시: 검증에서 문제가 난 조각만 지우고 다시 돌리면 나머지는 재사용된다
     out = Path(a.out)

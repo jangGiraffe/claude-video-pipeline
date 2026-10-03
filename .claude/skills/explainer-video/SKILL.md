@@ -28,7 +28,7 @@ Windows PowerShell 기준. Python은 항상 `.\.venv\Scripts\python.exe`, 실행
 
 ## 2. 음성 + 타이밍
 ```powershell
-.\.venv\Scripts\python.exe pipeline\run.py <job> [--style "말투 지시"] [--voice Kore]
+.\.venv\Scripts\python.exe pipeline\run.py <job> [--voice Kore] [--model ...] [--style "말투 지시(3.8 전용)"]
 ```
 - `scenes.json` 이 없으면 TTS → Whisper → `timing.json` 까지 만들고 멈춘다.
 - 출력의 **"경고:"** 줄을 반드시 확인한다. `--strict` 로 돌기 때문에 경고가 있으면 실패한다.
@@ -39,7 +39,9 @@ Windows PowerShell 기준. Python은 항상 `.\.venv\Scripts\python.exe`, 실행
 - **"목소리 높낮이(Hz)"** 줄을 본다: `*` 조각은 다른 목소리로 나와 자동 재합성된다. 끝까지 경고면 `--style` 을 빼고 다시.
 - **"발음 점검"** 목록을 본다: 대본과 다르게 들린 어절. 숫자 표기 차이(다섯 → 5)·연음(1안 → 이란)은 무시하고,
   진짜 오독(예: M/M → 엠퍼엠)만 `pronounce.txt` 에 추가한 뒤 `--from tts` 로 다시 (바뀐 조각만 재합성).
-- 말투 기본값: 밝고 신뢰감 있는 테크 유튜버 톤. 사용자가 원하면 `--style` 로 변경.
+- TTS 모델 기본값: `gemini-2.5-pro-preview-tts` (유료 허락받음). 조각 간 목소리가 일정하고 말을 지어내지 않는다.
+  Pro 는 `--style` 을 지원하지 않는다(자동 무시). 말투 지시가 꼭 필요하면 `--model gemini-3.8-flash-tts --style "…"`
+  — 단 3.8 은 목소리가 흔들리고(남녀가 바뀌기도) 혼잡 시 응답이 없을 수 있다.
 - 목소리: Kore(기본, 여성 차분), Puck/Charon/Fenrir/Orus 등 30종. 사용자가 원하면 `--voice`.
 
 ## 3. 장면 기획 (`work/<job>/scenes.json`) ← Claude의 핵심 작업

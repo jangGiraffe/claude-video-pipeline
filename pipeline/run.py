@@ -23,11 +23,12 @@ from common import setup_ffmpeg_path
 ROOT = Path(__file__).resolve().parent.parent
 PY = sys.executable
 STEPS = ["tts", "transcribe", "render"]
+ENV = {**os.environ, "PYTHONUNBUFFERED": "1"}  # 자식 프로세스 출력이 바로바로 보이게
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> None:
     print("▶", " ".join(cmd))
-    r = subprocess.run(cmd, cwd=cwd, shell=(os.name == "nt" and cmd[0] == "npx"))
+    r = subprocess.run(cmd, cwd=cwd, shell=(os.name == "nt" and cmd[0] == "npx"), env=ENV)
     if r.returncode != 0:
         sys.exit(f"실패: {cmd[0]} (exit {r.returncode})")
 
@@ -37,6 +38,7 @@ def main() -> None:
     ap.add_argument("job")
     ap.add_argument("--style", default="밝고 친근하지만 신뢰감 있는 테크 유튜버 내레이션. 적당히 빠른 템포.")
     ap.add_argument("--voice", default="Kore")
+    ap.add_argument("--model", default=None, help="TTS 모델 (기본: tts.py 의 MODEL). --style 은 3.8 계열에서만 적용")
     ap.add_argument("--from", dest="start", choices=STEPS, default="tts", help="이 단계부터 다시 실행")
     ap.add_argument("--stills", action="store_true", help="MP4 대신 장면별 미리보기 PNG만 (work/<job>/stills/)")
     ap.add_argument("--crf", type=int, default=23, help="화질(낮을수록 고화질·큰 파일). 기본 23 ≈ 3분에 20MB 안팎")
@@ -49,7 +51,7 @@ def main() -> None:
         sys.exit(f"{script} 이(가) 없습니다.")
     todo = STEPS[STEPS.index(a.start):]
 
-    tts = [PY, str(ROOT / "pipeline/tts.py"), str(script), str(work / "voice.wav"), "--voice", a.voice, "--style", a.style]
+    tts = [PY, str(ROOT / "pipeline/tts.py"), str(script), str(work / "voice.wav"), "--voice", a.voice, "--style", a.style] + (["--model", a.model] if a.model else [])
     stt = [PY, str(ROOT / "pipeline/transcribe.py"), str(work / "voice.wav"), str(work), "--script", str(script), "--strict"]
     if "tts" in todo:
         run(tts)
@@ -57,7 +59,7 @@ def main() -> None:
         # 검증 실패 시: 문제 구간이 들어 있는 TTS 조각만 캐시에서 지우고 다시 합성 (최대 3회)
         for attempt in range(4):
             print("▶", " ".join(stt))
-            if subprocess.run(stt).returncode == 0:
+            if subprocess.run(stt, env=ENV).returncode == 0:
                 break
             bad = work / "bad_spans.json"
             if attempt == 3 or "tts" not in todo or not bad.exists():
