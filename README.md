@@ -28,7 +28,7 @@
 ## ⚙️ 어떻게 동작하나
 
 ```mermaid
-flowchart LR
+flowchart TD
     A["📝 script.txt<br/>대본"] --> B["🗣️ Gemini TTS<br/>자연스러운 목소리"]
     B --> C["⏱️ Whisper (GPU)<br/>단어별 타이밍"]
     C --> D["🧠 Claude<br/>장면 기획 scenes.json"]
