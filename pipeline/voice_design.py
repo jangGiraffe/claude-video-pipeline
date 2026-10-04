@@ -17,10 +17,8 @@ import sys
 import time
 from pathlib import Path
 
-from google import genai
-from google.genai import types
 
-from common import ROOT, get_api_key
+from common import ROOT, gemini_client
 
 REGISTRY = ROOT / "voices.local.json"
 SAMPLES = ROOT / "voices"
@@ -60,8 +58,7 @@ def main() -> int:
     if a.name in reg:
         sys.exit(f"'{a.name}' 은(는) 이미 있습니다: {reg[a.name]['id']}. 다른 별칭을 쓰세요.")
 
-    client = genai.Client(api_key=get_api_key(),
-                          http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=0)))
+    client = gemini_client()
     try:
         v = client.voices.create(store=True, voice={
             "model": a.model,
@@ -74,7 +71,7 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         msg = str(e)
         if "429" in msg[:40] or "RESOURCE_EXHAUSTED" in msg:
-            sys.exit(f"실패: 요청 한도 초과 ({a.model}). 하루 한도면 한국 시간 16시(태평양 자정) 이후 다시 실행하세요.")
+            sys.exit(f"실패: 요청 한도 초과 ({a.model}). 서버 안내: {msg[:200]}")
         sys.exit(f"실패: 목소리 생성 — {msg[:300]}")
 
     vid = _get(v, "id")

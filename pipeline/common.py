@@ -105,6 +105,19 @@ def load_settings() -> dict:
     return s
 
 
+def gemini_client():
+    """자동 재시도를 완전히 끈 Gemini 클라이언트.
+    SDK 기본값은 429 를 받으면 서버가 준 Retry-After(하루 한도면 수십 시간)만큼 조용히 기다려
+    '응답 없음'처럼 보인다. HttpRetryOptions(attempts=0) 은 interactions·voices 쪽에 적용되지 않아
+    두 하위 클라이언트의 retry_config 를 직접 'none' 으로 바꾼다 (2026-10-04 확인)."""
+    from google import genai
+    from google.genai._gaos.utils import RetryConfig
+    client = genai.Client(api_key=get_api_key())
+    for sub in (client.interactions, client.voices):
+        sub.sdk_configuration.retry_config = RetryConfig("none", None, False)
+    return client
+
+
 def get_api_key() -> str:
     key = os.environ.get("GEMINI_API_KEY")
     if not key and sys.platform == "win32":

@@ -124,7 +124,7 @@ def main() -> None:
         else:
             if quota_hit:
                 sys.exit(f"실패: 하루 요청 한도 초과 ({', '.join(dict.fromkeys(quota_hit))}). "
-                         "한국 시간 16시(태평양 자정, 서머타임 해제 후 17시) 이후 다시 실행하거나 "
+                         "위 tts 출력의 재시도 안내 시간 뒤에 다시 실행하거나 "
                          "--model 로 한도에 여유 있는 모델을 지정하세요.")
             sys.exit("실패: 음성 생성/검증" +("" if len(tiers) > 1 or a.model else " (--no-paid 라 유료 모델은 쓰지 않음)"))
     elif "transcribe" in todo:

@@ -23,6 +23,7 @@ import hashlib
 import io
 import json
 import queue
+import re
 import statistics
 import sys
 import threading
@@ -32,10 +33,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
-from google import genai
-from google.genai import types
 
-from common import get_api_key, load_pronounce, spoken_text
+from common import gemini_client, load_pronounce, spoken_text
 from voice_design import resolve_voice
 
 # 무료 3.8 Flash 를 먼저 쓰고, 실패하면 run.py 가 유료 2.5 Pro 로 전체를 다시 합성한다 (비용 절약).
@@ -58,7 +57,7 @@ EXIT_DAILY_QUOTA = 3   # 하루 한도 초과 시 종료 코드 (run.py 와 같�
 
 
 class DailyQuotaError(RuntimeError):
-    """모델별 하루 요청 한도(RPD) 초과. 태평양 시간 자정(한국 16시, 서머타임 해제 후 17시)에 초기화."""
+    """모델별 하루 요청 한도(RPD) 초과. 초기화까지 남은 시간은 서버 응답의 'retry in …' 로 안내된다."""
 
 
 _rate_lock = threading.Lock()
@@ -123,7 +122,9 @@ def synthesize_pcm(client, text: str, voice: str, style: str | None) -> bytes:
             break
         except Exception as e:  # 레이트 리밋·일시 오류·무응답 → 백오프 후 재시도
             if _is_daily_quota(e):
-                raise DailyQuotaError(f"{MODEL} 하루 요청 한도 초과") from e
+                m = re.search(r"retry in ([0-9hms.]+)", str(e))
+                raise DailyQuotaError(f"{MODEL} 하루 요청 한도 초과"
+                                      + (f" (서버 안내: {m.group(1)} 뒤 재시도)" if m else "")) from e
             code = getattr(e, "status_code", None) or getattr(e, "code", None)
             if attempt == ATTEMPTS - 1 or (isinstance(code, int) and 400 <= code < 500 and code != 429):
                 raise  # 요청 자체가 잘못된 오류(400 등)는 재시도해도 같다
@@ -220,8 +221,7 @@ def main() -> int:
     cache = out.parent / "tts_cache"
     cache.mkdir(parents=True, exist_ok=True)
     # SDK 기본값은 429·5xx 를 조용히 재시도해 요청 수가 몇 배로 늘고 '응답 없음'처럼 보인다 → 끈다
-    client = genai.Client(api_key=get_api_key(),
-                          http_options=types.HttpOptions(retry_options=types.HttpRetryOptions(attempts=0)))
+    client = gemini_client()
 
     def key(c: str) -> str:
         return hashlib.sha1(f"{MODEL}|{a.voice}|{a.style}|{c}".encode()).hexdigest()[:16] + ".pcm"
@@ -241,7 +241,7 @@ def main() -> int:
             with ThreadPoolExecutor(max_workers=3) as ex:
                 pcms = list(ex.map(get, chunks))
         except DailyQuotaError as e:
-            print(f"실패: {e} — 한국 시간 16시(태평양 자정) 이후 초기화. AI Studio '비율 제한' 페이지에서 확인")
+            print(f"실패: {e}. 다른 TTS 모델은 한도가 따로라 --model 로 바꿔 진행할 수 있음 (AI Studio '비율 제한' 페이지 참고)")
             return EXIT_DAILY_QUOTA
         except Exception as e:  # noqa: BLE001 — 무응답·오류: run.py 가 다음 모델로 넘어간다
             print(f"실패: TTS 호출 ({MODEL}) — {str(e)[:150]}")
