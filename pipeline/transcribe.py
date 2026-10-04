@@ -34,6 +34,9 @@ def whisper_words(audio: Path, model_name: str, prompt: str | None):
     segs, info = model.transcribe(
         str(audio), language="ko", word_timestamps=True, vad_filter=True,
         initial_prompt=prompt[:400] if prompt else None,
+        # 긴 음성(5분+)에서 앞 구간 결과를 다음 구간 프롬프트로 이어 쓰면 이미 지나간 문장을
+        # 반복해 받아적는다 → 멀쩡한 TTS 를 '대본에 없는 말'로 오판 (2026-10-04)
+        condition_on_previous_text=False,
     )
     words = [{"text": w.word.strip(), "start": w.start, "end": w.end}
              for s in segs for w in (s.words or []) if w.word.strip()]

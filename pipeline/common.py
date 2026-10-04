@@ -61,6 +61,9 @@ def _apply_dict(tok: str, pairs: list[tuple[str, str]]) -> str:
                 fixed = JOSA[j]
             elif _has_batchim(spoken[-1]) and j in JOSA.values():
                 fixed = {v: k for k, v in JOSA.items()}[j]
+            # ㄹ 받침 뒤에는 '으로' 가 아니라 '로' (씨씨티알로, 서울로)
+            if fixed in ("으로", "로") and (ord(spoken[-1]) - 0xAC00) % 28 == 8:
+                fixed = "로"
             out.append(f"{{{disp}{j}|{spoken}{fixed}}}")
             pos += len(j)
         else:
