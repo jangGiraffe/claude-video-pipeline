@@ -78,7 +78,7 @@ export const Explainer: React.FC<ExplainerProps> = ({ job, timing, plan }) => {
         const to = i + 1 < frames.length ? frames[i + 1] : durationInFrames;
         return (
           <Sequence key={i} from={from} durationInFrames={Math.max(1, to - from)} name={`${i}:${scene.type}`}>
-            <SceneContext.Provider value={{ timing, sceneStartSec: starts[i], theme }}>
+            <SceneContext.Provider value={{ timing, sceneStartSec: starts[i], theme, job }}>
               <FadeIn>
                 <Comp {...scene.props} />
               </FadeIn>

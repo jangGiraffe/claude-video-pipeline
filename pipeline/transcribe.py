@@ -33,7 +33,9 @@ def whisper_words(audio: Path, model_name: str, prompt: str | None):
     model = WhisperModel(model_name, device="cuda", compute_type="float16")
     segs, info = model.transcribe(
         str(audio), language="ko", word_timestamps=True, vad_filter=True,
-        initial_prompt=prompt[:400] if prompt else None,
+        # 대본 문장을 initial_prompt 로 주면 첫머리에서 그 문장을 되읊거나 'disadvant' 같은 말을 지어낸다
+        # → 대본 속 영문 용어만 hotwords 로 준다 (철자 힌트 효과는 유지, 2026-10-04)
+        hotwords=" ".join(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9]+", prompt)))[:300] if prompt else None,
         # 긴 음성(5분+)에서 앞 구간 결과를 다음 구간 프롬프트로 이어 쓰면 이미 지나간 문장을
         # 반복해 받아적는다 → 멀쩡한 TTS 를 '대본에 없는 말'로 오판 (2026-10-04)
         condition_on_previous_text=False,
@@ -173,7 +175,7 @@ def main() -> None:
     if script:
         pairs = load_pronounce(Path(a.script))
         sentences = parse_script(script, pairs)
-        words, duration = whisper_words(Path(a.audio), a.model, spoken_text(script, pairs))
+        words, duration = whisper_words(Path(a.audio), a.model, script)  # 표기 그대로(영문 용어 hotwords 용)
         sents, tokens, matched, extra = align(sentences, words)
         print(f"대본 정렬 일치율: {matched:.1%} / 음성 중 대본에 없는 말(중간): {extra['inner_ratio']:.1%}")
         if extra["tail"]:

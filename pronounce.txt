@@ -40,3 +40,10 @@ Kiro = 키로              # 사전 없이: 'KILO'
 CloudFront = 클라우드프론트
 ServiceNow = 서비스나우
 DynamoDB = 다이나모디비
+
+# 항공 여정 단위 (Whisper 가 한글로 받아적음, 2026-10-04)
+Leg = 레그
+Segment = 세그먼트
+Journey = 저니
+Trip = 트립
+Itinerary = 아이티너러리

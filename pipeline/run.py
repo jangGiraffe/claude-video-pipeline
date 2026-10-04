@@ -15,6 +15,7 @@
 """
 import argparse
 import datetime
+import fnmatch
 import json
 import os
 import re
@@ -140,6 +141,14 @@ def main() -> None:
     pub.mkdir(parents=True, exist_ok=True)
     for f in ["voice.wav", "timing.json", "scenes.json"]:
         shutil.copy2(work / f, pub / f)
+    # image 장면용 이미지: work/<job>/images/ → public/<job>/images/
+    shutil.rmtree(pub / "images", ignore_errors=True)
+    if (work / "images").is_dir():
+        shutil.copytree(work / "images", pub / "images")
+    missing = [s["props"]["src"] for s in json.loads((work / "scenes.json").read_text(encoding="utf-8"))["scenes"]
+               if s["type"] == "image" and not (work / "images" / s["props"]["src"]).exists()]
+    if missing:
+        sys.exit(f"이미지 파일이 없습니다 (work/{a.job}/images/): {', '.join(missing)}")
     props = f"--props={{\"job\":\"{a.job}\"}}"
 
     timing = json.loads((work / "timing.json").read_text(encoding="utf-8"))
@@ -174,6 +183,11 @@ def main() -> None:
     dest = settings.get("output_dir")
     if dest:
         dest = Path(os.path.expandvars(os.path.expanduser(dest)))
+        # output_subdirs: {"ojt-*": "OJT"} 처럼 작업 이름 패턴별 하위 폴더 (먼저 맞는 것 사용)
+        for pat, sub in settings.get("output_subdirs", {}).items():
+            if fnmatch.fnmatch(a.job, pat):
+                dest = dest / sub
+                break
         dest.mkdir(parents=True, exist_ok=True)
         name = f"{datetime.date.today():%Y%m%d}_{a.job}.mp4"
         shutil.copy2(work / "output.mp4", dest / name)

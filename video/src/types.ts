@@ -22,7 +22,7 @@ export type Theme = {
 export type SceneSpec = {
   /** 장면 시작: 문장 번호 또는 어절. 다음 장면 시작 직전까지 이어진다 */
   at: TimeRef;
-  type: "hook" | "keyword" | "title" | "steps" | "terminal" | "bullets";
+  type: "hook" | "keyword" | "title" | "steps" | "terminal" | "bullets" | "image";
   props: Record<string, unknown>;
 };
 

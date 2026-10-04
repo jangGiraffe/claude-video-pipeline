@@ -1,5 +1,8 @@
 {
-  "_comment": "이 파일을 settings.local.json 으로 복사해 환경에 맞게 고치세요 (settings.local.json 은 git 제외). output_dir: 완성본을 <날짜>_<작업>.mp4 로 복사할 폴더(없으면 복사 안 함). voice: 기본 목소리(Kore 등 또는 voice_design.py 로 만든 별칭).",
+  "_comment": "이 파일을 settings.local.json 으로 복사해 환경에 맞게 고치세요 (settings.local.json 은 git 제외). output_dir: 완성본을 <날짜>_<작업>.mp4 로 복사할 폴더(없으면 복사 안 함). voice: 기본 목소리(Kore 등 또는 voice_design.py 로 만든 별칭). output_subdirs: 작업 이름 패턴별 하위 폴더 (예: ojt-* → OJT).",
   "output_dir": "C:/Users/<사용자>/Videos/explainer",
-  "voice": "Kore"
+  "voice": "Kore",
+  "output_subdirs": {
+    "ojt-*": "OJT"
+  }
 }

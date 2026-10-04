@@ -22,6 +22,7 @@
 | `steps` | `title?, steps: [{label, sub?, icon?, at}], arrows?` | 순서·흐름. 말에 맞춰 카드가 하나씩 켜짐 (최대 5개). **순서가 아닌 나열이면 `"arrows": false`** (화살표가 흐름처럼 오해됨) |
 | `terminal` | `title?, lines: [{text, at?, color?}]` | 명령어, 코드, 로그 타이핑 |
 | `bullets` | `title, items: [{text, at?}]` | 체크리스트, 장점 나열 |
+| `image` | `src, title?, caption?, at?, zoom?` | 실제 화면 캡처·도식. 파일은 `work/<job>/images/` 에 두고 `src` 는 파일명. 천천히 확대(zoom 기본 true). 개인정보·계정·IP 가 보이면 잘라서 쓴다 |
 
 ## 최상위 옵션
 - `captions`: 하단 자막 표시 (기본 true)

@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Img, interpolate, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { enter, pop } from "./anim";
 import { Emph, useAt, useScene } from "./timing";
 import type { TimeRef } from "./types";
@@ -206,4 +206,28 @@ export const Bullets: React.FC<BulletsProps> = ({ title, items }) => {
   );
 };
 
-export const SCENES = { hook: Hook, keyword: Keyword, title: Title, steps: Steps, terminal: Terminal, bullets: Bullets } as const;
+/* ───────── image: 실제 화면 캡처·도식 이미지 (work/<job>/images/ 에 둔 파일) ───────── */
+type ImageProps = { src: string; title?: string; caption?: string; at?: TimeRef; zoom?: boolean };
+export const ImageScene: React.FC<ImageProps> = ({ src, title, caption, at: atRef, zoom = true }) => {
+  const frame = useCurrentFrame();
+  const { fps, durationInFrames } = useVideoConfig();
+  const { theme, job } = useScene();
+  const at = useAt();
+  const s = atRef !== undefined ? at(atRef) : 0;
+  // 천천히 확대 (Ken Burns). 장면 길이에 걸쳐 1.0 → 1.05
+  const scale = zoom ? interpolate(frame, [s, Math.max(s + 1, durationInFrames)], [1, 1.05], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) : 1;
+  const maxH = title ? (caption ? 560 : 620) : (caption ? 640 : 700);
+  return (
+    <AbsoluteFill style={{ justifyContent: "center", alignItems: "center", padding: "60px 140px 200px" }}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 28 }}>
+        {title && <div style={{ fontSize: fit(title, 64, SAFE_W), fontWeight: 800, whiteSpace: "nowrap", ...enter(frame, fps, 0) }}><Emph text={title} /></div>}
+        <div style={{ borderRadius: 20, overflow: "hidden", border: `3px solid ${theme.accent}55`, boxShadow: `0 20px 60px #00000080`, background: "#fff", ...enter(frame, fps, s, 30) }}>
+          <Img src={staticFile(`${job}/images/${src}`)} style={{ display: "block", maxWidth: SAFE_W, maxHeight: maxH, transform: `scale(${scale})`, transformOrigin: "center" }} />
+        </div>
+        {caption && <div style={{ fontSize: fit(caption, 40, SAFE_W), color: theme.dim, fontWeight: 600, whiteSpace: "nowrap", ...enter(frame, fps, s + 8) }}><Emph text={caption} /></div>}
+      </div>
+    </AbsoluteFill>
+  );
+};
+
+export const SCENES = { hook: Hook, keyword: Keyword, title: Title, steps: Steps, terminal: Terminal, bullets: Bullets, image: ImageScene } as const;

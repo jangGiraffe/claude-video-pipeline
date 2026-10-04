@@ -2,7 +2,7 @@ import React, { createContext, useContext } from "react";
 import { useVideoConfig } from "remotion";
 import type { Theme, TimeRef, Timing } from "./types";
 
-type Ctx = { timing: Timing; sceneStartSec: number; theme: Theme };
+type Ctx = { timing: Timing; sceneStartSec: number; theme: Theme; job: string };
 export const SceneContext = createContext<Ctx | null>(null);
 
 export const useScene = () => {
