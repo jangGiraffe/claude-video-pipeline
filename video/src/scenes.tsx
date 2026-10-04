@@ -93,8 +93,9 @@ export const Title: React.FC<TitleProps> = ({ kicker, title, subtitle }) => {
 
 /* ───────── steps: 단계 카드가 말에 맞춰 하나씩 켜지는 흐름도 ───────── */
 type Step = { label: string; sub?: string; icon?: string; at: TimeRef };
-type StepsProps = { title?: string; steps: Step[] };
-export const Steps: React.FC<StepsProps> = ({ title, steps }) => {
+// arrows=false: 순서가 아닌 나열(구성 요소·담당 등)일 때 화살표 없이 카드만 나란히
+type StepsProps = { title?: string; steps: Step[]; arrows?: boolean };
+export const Steps: React.FC<StepsProps> = ({ title, steps, arrows = true }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const { theme } = useScene();
@@ -103,21 +104,21 @@ export const Steps: React.FC<StepsProps> = ({ title, steps }) => {
   const active = starts.reduce((acc, s, i) => (frame >= s ? i : acc), -1);
   // 카드 폭: 개수에 맞춰 안전 영역을 나눈다 (화살표 칸 포함). 활성 카드 1.08배 확대 여유도 둔다
   const n = steps.length;
-  const arrowW = n >= 5 ? 44 + 2 * 12 : 56 + 2 * 18;
+  const arrowW = arrows ? (n >= 5 ? 44 + 2 * 12 : 56 + 2 * 18) : (n >= 5 ? 24 : 36);
   const cardW = Math.min(320, Math.floor((SAFE_W - (n - 1) * arrowW) / n / 1.08));
   const inner = cardW - 2 * 16 - 6;
   return (
     <Center>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 70, width: "100%" }}>
         {title && <div style={{ fontSize: 64, fontWeight: 800, ...enter(frame, fps, 0) }}><Emph text={title} /></div>}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: n >= 5 ? 12 : 18 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: arrows ? (n >= 5 ? 12 : 18) : (n >= 5 ? 24 : 36) }}>
           {steps.map((s, i) => {
             const shown = frame >= starts[i];
             const isActive = i === active;
             const glow = isActive ? interpolate(Math.sin(frame / 6), [-1, 1], [0.5, 1]) : 0;
             return (
               <React.Fragment key={i}>
-                {i > 0 && (
+                {arrows && i > 0 && (
                   <div style={{ fontSize: n >= 5 ? 44 : 56, color: shown ? theme.accent : theme.dim, opacity: shown ? 1 : 0.25, transition: "none" }}>→</div>
                 )}
                 <div style={shown ? enter(frame, fps, starts[i], 30) : { opacity: 0.28 }}>

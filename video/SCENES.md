@@ -19,7 +19,7 @@
 | `hook` | `lines: [{text, at?}]` | 도입 질문, 큰 문장 여러 줄 |
 | `keyword` | `text, sub?, chip?, at?` | 핵심 키워드 하나를 크게 |
 | `title` | `kicker?, title, subtitle?` | 챕터 제목, 마무리 |
-| `steps` | `title?, steps: [{label, sub?, icon?, at}]` | 순서·흐름. 말에 맞춰 카드가 하나씩 켜짐 (최대 5개) |
+| `steps` | `title?, steps: [{label, sub?, icon?, at}], arrows?` | 순서·흐름. 말에 맞춰 카드가 하나씩 켜짐 (최대 5개). **순서가 아닌 나열이면 `"arrows": false`** (화살표가 흐름처럼 오해됨) |
 | `terminal` | `title?, lines: [{text, at?, color?}]` | 명령어, 코드, 로그 타이핑 |
 | `bullets` | `title, items: [{text, at?}]` | 체크리스트, 장점 나열 |
 
