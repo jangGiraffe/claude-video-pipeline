@@ -35,3 +35,8 @@ SOAP = 솝                # 사전 없이: '소아비'
 RAG = 래그               # 사전 없이: 'RAGE'
 GraphRAG = 그래프 래그
 Kiro = 키로              # 사전 없이: 'KILO'
+
+# 클라우드·도구 (Whisper 가 한글로 받아적어 검증 오탐 나던 것, 2026-10-04)
+CloudFront = 클라우드프론트
+ServiceNow = 서비스나우
+DynamoDB = 다이나모디비

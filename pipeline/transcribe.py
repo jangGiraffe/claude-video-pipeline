@@ -185,7 +185,9 @@ def main() -> None:
         problems = []
         if run_weight(extra["inner_run"]) >= 6:
             problems.append(f"중간에 대본에 없는 말이 연속으로 있음: '{extra['inner_run']}' (지시문 낭독/환각 의심)")
-        if len(extra["lead"]) >= 4:
+        # 영문은 빼고 센다: 첫머리 무음에서 Whisper 가 'disadvant' 같은 영어를 지어내는 일이 있고,
+        # TTS 가 한국어 말투 지시를 읽어 버린 경우는 한국어로 나온다 (2026-10-04)
+        if run_weight(extra["lead"]) >= 4:
             problems.append(f"대본 시작 전에 다른 말이 있음: '{extra['lead']}' (TTS가 지시문을 읽었을 수 있음)")
         if matched < 0.9:
             problems.append(f"대본 일치율 낮음 {matched:.1%} (TTS가 문장을 빠뜨렸을 수 있음)")
