@@ -47,3 +47,4 @@ Segment = 세그먼트
 Journey = 저니
 Trip = 트립
 Itinerary = 아이티너러리
+IATA = 아이아타
