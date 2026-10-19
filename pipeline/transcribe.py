@@ -175,6 +175,16 @@ def align(sentences: list[list[dict]], words: list[dict]):
         ts = [t for t in tokens if t["sentence"] == si]
         sents.append({"text": " ".join(t["text"] for t in ts), "start": ts[0]["start"], "end": ts[-1]["end"]})
     matched = sum(1 for m in mapped if m) / max(1, len(mapped))
+
+    # 문장 단위 누락: 전체 일치율이 높아도 TTS 가 문장 몇 개를 통째로 건너뛸 수 있다
+    # (12줄 조각에서 4문장 누락 → 전체 93.9% 로 통과했던 사례, 2026-10-19)
+    owner_hits: dict[int, list[bool]] = {}
+    for i, o in enumerate(s_owner):
+        owner_hits.setdefault(tokens[o]["sentence"], []).append(mapped[i] is not None)
+    extra["missing"] = [si for si, hs in sorted(owner_hits.items()) if len(hs) >= 6 and sum(hs) / len(hs) < 0.4]
+    for si in extra["missing"]:
+        t0 = sents[si]["start"]
+        extra["bad_spans"].append((t0 - 0.5, t0 + 0.5))
     return sents, tokens, matched, extra
 
 
@@ -220,6 +230,8 @@ def main() -> None:
             problems.append(f"대본 시작 전에 다른 말이 있음: '{extra['lead']}' (TTS가 지시문을 읽었을 수 있음)")
         if matched < 0.9:
             problems.append(f"대본 일치율 낮음 {matched:.1%} (TTS가 문장을 빠뜨렸을 수 있음)")
+        if extra["missing"]:
+            problems.append("음성에서 빠진 문장: " + ", ".join(str(i) for i in extra["missing"]))
         if extra["inner_ratio"] > 0.1:
             problems.append(f"음성에 대본에 없는 말이 {extra['inner_ratio']:.1%}")
         for p in problems:
