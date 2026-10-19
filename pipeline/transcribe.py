@@ -29,13 +29,40 @@ def norm(s: str) -> str:
     return NON_CHAR.sub("", s).lower()
 
 
-def whisper_words(audio: Path, model_name: str, prompt: str | None):
+def hotwords_for(script: str, pairs: list[tuple[str, str]]) -> str | None:
+    """대본 속 영문 용어 중 발음 사전에 없는 것(= TTS 가 영어로 읽는 것)만 hotwords 로.
+    사전 용어까지 넣으면 한글로 읽힌 말을 영문으로 받아적게 되고, 목록이 길면 Whisper 가
+    첫 구간을 목록 그대로 받아적는다 ('awscloudfrontdynamodb…', 2026-10-19)."""
+    dict_words = {w.lower() for k, _ in pairs for w in re.findall(r"[A-Za-z][A-Za-z0-9]+", k)}
+    terms = [t for t in dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9]+", script)) if t.lower() not in dict_words]
+    return " ".join(terms[:15]) or None
+
+
+def respell(words: list[dict], pairs: list[tuple[str, str]]) -> list[dict]:
+    """Whisper 가 사전 용어를 영문 표기로 받아적은 부분('ess는', 'activemq의')을 읽는 발음으로 되돌린다.
+    정렬은 발음 기준이라, 이걸 안 하면 제대로 읽은 용어가 '대본에 없는 말'로 잡힌다."""
+    table = sorted({(norm(k), norm(v)) for k, v in pairs if norm(k).isascii() and norm(k)}, key=lambda kv: -len(kv[0]))
+
+    def fix_run(run: str) -> str:
+        whole = next((v for k, v in table if k == run), None)
+        if whole is not None:
+            return whole
+        out, i = "", 0
+        while i < len(run):
+            hit = next(((k, v) for k, v in table if len(k) >= 2 and run.startswith(k, i)), None)
+            out, i = (out + hit[1], i + len(hit[0])) if hit else (out + run[i], i + 1)
+        return out
+
+    return [{**w, "text": re.sub(r"[a-z0-9]+", lambda m: fix_run(m.group()), norm(w["text"]))} for w in words]
+
+
+def whisper_words(audio: Path, model_name: str, hotwords: str | None):
     model = WhisperModel(model_name, device="cuda", compute_type="float16")
     segs, info = model.transcribe(
         str(audio), language="ko", word_timestamps=True, vad_filter=True,
         # 대본 문장을 initial_prompt 로 주면 첫머리에서 그 문장을 되읊거나 'disadvant' 같은 말을 지어낸다
         # → 대본 속 영문 용어만 hotwords 로 준다 (철자 힌트 효과는 유지, 2026-10-04)
-        hotwords=" ".join(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9]+", prompt)))[:300] if prompt else None,
+        hotwords=hotwords,
         # 긴 음성(5분+)에서 앞 구간 결과를 다음 구간 프롬프트로 이어 쓰면 이미 지나간 문장을
         # 반복해 받아적는다 → 멀쩡한 TTS 를 '대본에 없는 말'로 오판 (2026-10-04)
         condition_on_previous_text=False,
@@ -175,8 +202,8 @@ def main() -> None:
     if script:
         pairs = load_pronounce(Path(a.script))
         sentences = parse_script(script, pairs)
-        words, duration = whisper_words(Path(a.audio), a.model, script)  # 표기 그대로(영문 용어 hotwords 용)
-        sents, tokens, matched, extra = align(sentences, words)
+        words, duration = whisper_words(Path(a.audio), a.model, hotwords_for(script, pairs))
+        sents, tokens, matched, extra = align(sentences, respell(words, pairs))
         print(f"대본 정렬 일치율: {matched:.1%} / 음성 중 대본에 없는 말(중간): {extra['inner_ratio']:.1%}")
         if extra["tail"]:
             print(f"참고: 대본 끝 이후 인식된 말 '{extra['tail']}' (보통 Whisper 환각, 무시됨)")
